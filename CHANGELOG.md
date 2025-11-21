@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DeepgramWebsocketTTSService` which uses Deepgram's TTS websocket API.
+
 - Added `DeepgramSageMakerSTTService` which connects to a SageMaker hosted
   Deepgram STT model. Added `07c-interruptible-deepgram-sagemaker.py`
   foundational example.
@@ -225,6 +227,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     options: spell, pauses, pronunciations, and inline speed control.
 
 ### Deprecated
+
+- Deprecated `DeepgramTTSService`. This service is replaced by
+  `DeepgramWebsocketTTSService` which has better performance and interruption
+  handling.
 
 - The TTS constructor field, `text_aggregator` is deprecated in favor of the new
   `LLMTextProcessor`. TTSServices still have an internal aggregator for support
