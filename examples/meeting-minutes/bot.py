@@ -77,10 +77,13 @@ except (ImportError, Exception) as e:
 # Import streaming recorder
 from streaming_recorder import StreamingAudioRecorder
 
+# Import history service
+from history_service import history_service
+
 load_dotenv(override=True)
 
 # Global state for recording and language
-recording_state = {"is_recording": False, "language": Language.JA, "websockets": []}
+recording_state = {"is_recording": False, "language": Language.JA, "websockets": [], "current_filename": None}
 audio_recorder_instance = None
 
 
@@ -143,6 +146,14 @@ class TranscriptBroadcaster(FrameProcessor):
 
     async def _broadcast(self, message: dict):
         """Broadcast message to all connected WebSocket clients."""
+        # Save to history service
+        if message.get("type") == "transcription":
+            history_service.save_transcript(message)
+            logger.debug(f"💾 Attempted to save transcript: is_final={message.get('is_final')}, text={message.get('text', '')[:30]}...")
+        elif message.get("type") == "translation":
+            history_service.save_translation(message)
+            logger.debug(f"💾 Attempted to save translation: text={message.get('text', '')[:30]}...")
+        
         if not self._websockets:
             logger.warning("⚠️ No WebSocket clients connected to receive transcript")
             return
@@ -244,13 +255,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("✅ WebRTC Client connected - Audio input ready")
-        # Start recording if requested
+        # Start recording if requested - use the filename from recording_state
         if recording_state["is_recording"] and audio_recorder_instance:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            lang_code = "ja" if input_language == Language.JA else "en"
-            filename = f"meeting_{lang_code}_{timestamp}.wav"
-            await audio_recorder_instance.start_recording(filename)
-            logger.info(f"🎙️ Started recording to {filename}")
+            filename = recording_state.get("current_filename")
+            if filename:
+                await audio_recorder_instance.start_recording(filename)
+                logger.info(f"🎙️ Started recording to {filename}")
+            else:
+                # Fallback: generate new filename if not set (shouldn't happen)
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                lang_code = "ja" if input_language == Language.JA else "en"
+                filename = f"meeting_{lang_code}_{timestamp}.wav"
+                await audio_recorder_instance.start_recording(filename)
+                # Also start history session with this filename
+                session_id = filename.replace(".wav", "")
+                history_service.start_session(session_id)
+                recording_state["current_filename"] = filename
+                logger.info(f"🎙️ Started recording to {filename} (fallback)")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
@@ -387,11 +408,24 @@ def setup_custom_routes(app: FastAPI):
         recording_state["language"] = language
         recording_state["is_recording"] = True
 
+        # Generate filename and start history session first
+        # IMPORTANT: Use same timestamp for both JSON and WAV files
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"meeting_{language_code}_{timestamp}.wav"
+        session_id = filename.replace(".wav", "")
+        
+        # Store filename in global state so on_client_connected can use it
+        recording_state["current_filename"] = filename
+        
+        # Start history session (always, even if audio recorder not ready yet)
+        history_service.start_session(session_id)
+        logger.info(f"📚 Started history session: {session_id}")
+
         # Start recording if audio recorder is ready
         if audio_recorder_instance:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"meeting_{language_code}_{timestamp}.wav"
             await audio_recorder_instance.start_recording(filename)
+        else:
+            logger.warning("⚠️ Audio recorder not ready, but history session started")
 
         logger.info(f"Recording started with language: {language_code}")
 
@@ -406,6 +440,10 @@ def setup_custom_routes(app: FastAPI):
         recording_state["is_recording"] = False
         if audio_recorder_instance:
             await audio_recorder_instance.stop_recording()
+        # End history session and save to JSON (always, even if recorder not ready)
+        history_service.end_session()
+        # Clear current filename
+        recording_state["current_filename"] = None
         logger.info("Recording stopped")
         return {"status": "stopped"}
 
@@ -455,6 +493,10 @@ def setup_custom_routes(app: FastAPI):
     static_dir = os.path.join(os.path.dirname(__file__), "static")
     if os.path.exists(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    
+    # Setup history routes
+    from history_routes import setup_history_routes
+    setup_history_routes(app)
 
 
 if __name__ == "__main__":

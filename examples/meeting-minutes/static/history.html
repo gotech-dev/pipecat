@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lịch sử Meeting - Meeting Minutes</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+
+        .back-button {
+            position: absolute;
+            top: 30px;
+            left: 30px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+
+        .back-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .history-list {
+            display: grid;
+            gap: 15px;
+        }
+
+        .history-item {
+            padding: 20px;
+            border-radius: 10px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .history-item:hover {
+            background: #e9ecef;
+            transform: translateX(5px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .history-item-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #212529;
+        }
+
+        .history-item-meta {
+            font-size: 14px;
+            color: #6c757d;
+        }
+
+        .history-item-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-badge.has-transcript {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-badge.no-transcript {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .empty-state-text {
+            font-size: 18px;
+        }
+
+        /* Modal for detail view */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 50px auto;
+            padding: 30px;
+            border-radius: 20px;
+            max-width: 900px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            position: relative;
+        }
+
+        .close {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+            transition: color 0.3s;
+        }
+
+        .close:hover {
+            color: #000;
+        }
+
+        .modal-header {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .modal-header h2 {
+            font-size: 24px;
+            color: #212529;
+            margin-bottom: 10px;
+        }
+
+        .modal-header .recording-info {
+            font-size: 14px;
+            color: #6c757d;
+        }
+
+        .audio-player {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .audio-player audio {
+            width: 100%;
+        }
+
+        .transcript-section {
+            margin-bottom: 30px;
+        }
+
+        .transcript-section h3 {
+            font-size: 18px;
+            margin-bottom: 15px;
+            color: #212529;
+        }
+
+        .transcript-item {
+            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 10px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+        }
+
+        .transcript-item.translation {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .transcript-text {
+            font-size: 16px;
+            line-height: 1.6;
+            color: #212529;
+            margin-bottom: 8px;
+        }
+
+        .transcript-timestamp {
+            font-size: 12px;
+            color: #adb5bd;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a href="/meeting" class="back-button">← Quay lại</a>
+            <h1>📚 Lịch sử Meeting</h1>
+            <p>Xem lại các cuộc họp đã ghi âm</p>
+        </div>
+
+        <div class="content">
+            <div id="historyList" class="history-list">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Đang tải...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for detail view -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeDetail()">&times;</span>
+            <div class="modal-header">
+                <h2 id="detailTitle">Chi tiết Meeting</h2>
+                <div class="recording-info" id="detailInfo"></div>
+            </div>
+            <div id="detailContent">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Đang tải...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load history on page load
+        window.addEventListener('DOMContentLoaded', loadHistory);
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/history');
+                const data = await response.json();
+                
+                const historyList = document.getElementById('historyList');
+                
+                if (data.recordings && data.recordings.length > 0) {
+                    historyList.innerHTML = data.recordings.map(rec => `
+                        <div class="history-item" onclick="viewRecording('${rec.id}')">
+                            <div class="history-item-header">
+                                <div>
+                                    <div class="history-item-title">
+                                        ${getLanguageLabel(rec.language)} - ${formatDate(rec.date)} ${formatTime(rec.time)}
+                                    </div>
+                                    <div class="history-item-meta">${rec.filename}</div>
+                                </div>
+                                <div class="history-item-status">
+                                    <span class="status-badge ${rec.has_transcript ? 'has-transcript' : 'no-transcript'}">
+                                        ${rec.has_transcript ? '✅ Có transcript' : '⚠️ Chỉ có audio'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    historyList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <div class="empty-state-text">Chưa có recording nào</div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading history:', error);
+                document.getElementById('historyList').innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <div class="empty-state-text">Lỗi khi tải lịch sử: ${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function viewRecording(recordingId) {
+            const modal = document.getElementById('detailModal');
+            const detailContent = document.getElementById('detailContent');
+            const detailTitle = document.getElementById('detailTitle');
+            const detailInfo = document.getElementById('detailInfo');
+            
+            modal.style.display = 'block';
+            detailContent.innerHTML = `
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div>Đang tải...</div>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`/api/history/${recordingId}`);
+                const data = await response.json();
+                
+                // Parse recording ID for display
+                const parts = recordingId.split('_');
+                const lang = parts[1] || 'unknown';
+                const date = parts[2] || '';
+                const time = parts[3] || '';
+                
+                detailTitle.textContent = `${getLanguageLabel(lang)} - ${formatDate(date)} ${formatTime(time)}`;
+                detailInfo.textContent = `File: ${data.filename}`;
+                
+                let html = '';
+                
+                // Audio player
+                if (data.wav_url) {
+                    html += `
+                        <div class="audio-player">
+                            <audio controls>
+                                <source src="${data.wav_url}" type="audio/wav">
+                                Trình duyệt không hỗ trợ audio.
+                            </audio>
+                        </div>
+                    `;
+                }
+                
+                // Transcripts section
+                if (data.transcripts && data.transcripts.length > 0) {
+                    // Filter to show only final transcriptions (or all if no final ones)
+                    const finalTranscripts = data.transcripts.filter(t => t.is_final === true);
+                    const transcriptsToShow = finalTranscripts.length > 0 ? finalTranscripts : data.transcripts;
+                    
+                    html += `
+                        <div class="transcript-section">
+                            <h3>📝 Bản gốc (${data.transcripts[0].language?.toUpperCase() || 'N/A'})</h3>
+                            ${transcriptsToShow.map(t => `
+                                <div class="transcript-item">
+                                    <div class="transcript-text">${escapeHtml(t.text)}</div>
+                                    <div class="transcript-timestamp">
+                                        ${formatTimestamp(t.timestamp)}
+                                        ${t.is_final === false ? ' <span style="color: #856404;">(tạm thời)</span>' : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="transcript-section">
+                            <h3>📝 Bản gốc</h3>
+                            <div class="empty-state">
+                                <div class="empty-state-text">Chưa có transcript</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                // Translations section
+                if (data.translations && data.translations.length > 0) {
+                    html += `
+                        <div class="transcript-section">
+                            <h3>🌐 Bản dịch (Tiếng Việt)</h3>
+                            ${data.translations.map(t => `
+                                <div class="transcript-item translation">
+                                    <div class="transcript-text">${escapeHtml(t.text)}</div>
+                                    <div class="transcript-timestamp">${formatTimestamp(t.timestamp)}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="transcript-section">
+                            <h3>🌐 Bản dịch</h3>
+                            <div class="empty-state">
+                                <div class="empty-state-text">Chưa có bản dịch</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                detailContent.innerHTML = html;
+            } catch (error) {
+                console.error('Error loading recording detail:', error);
+                detailContent.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">❌</div>
+                        <div class="empty-state-text">Lỗi khi tải chi tiết: ${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        function closeDetail() {
+            document.getElementById('detailModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('detailModal');
+            if (event.target == modal) {
+                closeDetail();
+            }
+        }
+
+        // Helper functions
+        function getLanguageLabel(lang) {
+            const labels = {
+                'ja': '🇯🇵 Tiếng Nhật',
+                'en': '🇬🇧 Tiếng Anh',
+            };
+            return labels[lang] || lang.toUpperCase();
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr || dateStr.length !== 8) return dateStr;
+            // 20251126 -> 26/11/2025
+            return `${dateStr.substring(6, 8)}/${dateStr.substring(4, 6)}/${dateStr.substring(0, 4)}`;
+        }
+
+        function formatTime(timeStr) {
+            if (!timeStr || timeStr.length !== 6) return timeStr;
+            // 211110 -> 21:11:10
+            return `${timeStr.substring(0, 2)}:${timeStr.substring(2, 4)}:${timeStr.substring(4, 6)}`;
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString('vi-VN');
+            } catch {
+                return timestamp;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
+

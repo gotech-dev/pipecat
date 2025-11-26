@@ -1,0 +1,46 @@
+{
+  "session_id": "meeting_ja_20251126_222507",
+  "transcripts": [
+    {
+      "type": "transcription",
+      "language": "ja",
+      "text": " こんにちは",
+      "timestamp": "2025-11-26T15:25:13.206+00:00",
+      "is_final": true
+    },
+    {
+      "type": "transcription",
+      "language": "ja",
+      "text": " 私は大と申します",
+      "timestamp": "2025-11-26T15:25:15.135+00:00",
+      "is_final": true
+    },
+    {
+      "type": "transcription",
+      "language": "ja",
+      "text": " 今後よろしく",
+      "timestamp": "2025-11-26T15:25:18.085+00:00",
+      "is_final": true
+    }
+  ],
+  "translations": [
+    {
+      "type": "translation",
+      "language": "vi",
+      "text": "Xin chào.",
+      "timestamp": "2025-11-26T15:25:14.321+00:00"
+    },
+    {
+      "type": "translation",
+      "language": "vi",
+      "text": "Tôi tên là Đại.",
+      "timestamp": "2025-11-26T15:25:16.135+00:00"
+    },
+    {
+      "type": "translation",
+      "language": "vi",
+      "text": "Sau này, xin vui lòng giúp đỡ.",
+      "timestamp": "2025-11-26T15:25:19.086+00:00"
+    }
+  ]
+}

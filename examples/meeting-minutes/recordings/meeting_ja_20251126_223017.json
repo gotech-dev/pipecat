@@ -1,0 +1,33 @@
+{
+  "session_id": "meeting_ja_20251126_223017",
+  "transcripts": [
+    {
+      "type": "transcription",
+      "language": "ja",
+      "text": " こんにちは今日はイテキですね",
+      "timestamp": "2025-11-26T15:30:23.593+00:00",
+      "is_final": true
+    },
+    {
+      "type": "transcription",
+      "language": "ja",
+      "text": " 皆さんはお元気でしょうか",
+      "timestamp": "2025-11-26T15:30:26.203+00:00",
+      "is_final": true
+    }
+  ],
+  "translations": [
+    {
+      "type": "translation",
+      "language": "vi",
+      "text": "Chào buổi sáng, hôm nay thời tiết thật đẹp ạ.",
+      "timestamp": "2025-11-26T15:30:24.735+00:00"
+    },
+    {
+      "type": "translation",
+      "language": "vi",
+      "text": "Quý vị có khỏe không ạ?",
+      "timestamp": "2025-11-26T15:30:27.020+00:00"
+    }
+  ]
+}
