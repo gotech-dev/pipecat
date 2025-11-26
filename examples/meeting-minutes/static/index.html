@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Minutes - Ghi âm & Dịch Realtime</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .control-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select, button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        select {
+            background: white;
+            border: 2px solid #dee2e6;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            background: #28a745;
+            color: white;
+            font-weight: 600;
+            min-width: 180px;
+        }
+
+        button:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.4);
+        }
+
+        button.recording {
+            background: #dc3545;
+        }
+
+        button.recording:hover {
+            background: #c82333;
+        }
+
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status.recording {
+            display: block;
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .transcripts {
+            padding: 30px;
+            max-height: 600px;
+            overflow-y: auto;
+            background: white;
+        }
+
+        .transcript-item {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .transcript-item.translation {
+            border-left-color: #28a745;
+            background: #d4edda;
+            margin-left: 30px;
+        }
+
+        .transcript-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+
+        .transcript-text {
+            font-size: 18px;
+            line-height: 1.6;
+            color: #212529;
+        }
+
+        .transcript-text.original {
+            font-weight: 500;
+        }
+
+        .transcript-text.translation {
+            color: #155724;
+        }
+
+        .transcript-timestamp {
+            font-size: 11px;
+            color: #adb5bd;
+            margin-top: 8px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+
+        .empty-state-text {
+            font-size: 18px;
+        }
+
+        /* Scrollbar styling */
+        .transcripts::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .transcripts::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .transcripts::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+
+        .transcripts::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎙️ Meeting Minutes</h1>
+            <p>Ghi âm và dịch realtime cuộc họp</p>
+        </div>
+
+        <div class="controls">
+            <div class="control-group">
+                <select id="language">
+                    <option value="ja">🇯🇵 Tiếng Nhật</option>
+                    <option value="en">🇬🇧 Tiếng Anh</option>
+                </select>
+                <button id="recordBtn" onclick="toggleRecording()">▶️ Bắt đầu ghi âm</button>
+            </div>
+            <div class="status" id="status"></div>
+        </div>
+
+        <div class="transcripts" id="transcripts">
+            <div class="empty-state">
+                <div class="empty-state-icon">🎤</div>
+                <div class="empty-state-text">Chọn ngôn ngữ và bấm "Bắt đầu ghi âm" để bắt đầu</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isRecording = false;
+        let ws = null;
+        let transcriptCount = 0;
+        let pc = null; // RTCPeerConnection
+        let localStream = null;
+        
+        // Session boxes - reset when starting new recording
+        let sessionTranscriptBox = null;
+        let sessionTranslationBox = null;
+
+        async function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+            const lang = document.getElementById('language').value;
+            const status = document.getElementById('status');
+            const transcripts = document.getElementById('transcripts');
+
+            if (!isRecording) {
+                // Start recording
+                try {
+                    const response = await fetch('/api/start-recording', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({language: lang})
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to start recording');
+                    }
+
+                    // Connect WebSocket
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws/transcripts`;
+                    ws = new WebSocket(wsUrl);
+
+                    ws.onopen = async () => {
+                        console.log('✅ WebSocket connected for transcripts');
+                        // Now connect to WebRTC to start audio input
+                        try {
+                            await connectWebRTC();
+                        } catch (error) {
+                            console.error('WebRTC connection failed:', error);
+                            alert('Không thể kết nối microphone. Vui lòng kiểm tra quyền truy cập.');
+                            // Reset UI on error
+                            btn.textContent = '▶️ Bắt đầu ghi âm';
+                            btn.classList.remove('recording');
+                            isRecording = false;
+                        }
+                    };
+
+                    ws.onmessage = (event) => {
+                        const data = JSON.parse(event.data);
+                        console.log('📨 Received transcript:', data);
+                        addTranscript(data);
+                    };
+
+                    ws.onerror = (error) => {
+                        console.error('❌ WebSocket error:', error);
+                        alert('Lỗi kết nối WebSocket. Vui lòng thử lại.');
+                    };
+
+                    ws.onclose = () => {
+                        console.log('WebSocket disconnected');
+                    };
+
+                    // Update UI
+                    btn.textContent = '⏹️ Dừng ghi âm';
+                    btn.classList.add('recording');
+                    status.textContent = `🔴 Đang ghi âm - Ngôn ngữ: ${lang === 'ja' ? 'Tiếng Nhật' : 'Tiếng Anh'}`;
+                    status.classList.add('recording');
+                    
+                    // Clear empty state
+                    if (transcriptCount === 0) {
+                        transcripts.innerHTML = '';
+                    }
+                    
+                    // Reset session boxes for new recording
+                    sessionTranscriptBox = null;
+                    sessionTranslationBox = null;
+
+                    isRecording = true;
+                } catch (error) {
+                    alert('Lỗi khi bắt đầu ghi âm: ' + error.message);
+                    console.error(error);
+                }
+            } else {
+                // Stop recording
+                try {
+                    await fetch('/api/stop-recording', {method: 'POST'});
+                    
+                    // Disconnect WebRTC
+                    disconnectWebRTC();
+                    
+                    if (ws) {
+                        ws.close();
+                        ws = null;
+                    }
+
+                    btn.textContent = '▶️ Bắt đầu ghi âm';
+                    btn.classList.remove('recording');
+                    status.textContent = '✅ Đã dừng ghi âm';
+                    status.classList.remove('recording');
+                    
+                    setTimeout(() => {
+                        status.style.display = 'none';
+                    }, 3000);
+
+                    isRecording = false;
+                } catch (error) {
+                    alert('Lỗi khi dừng ghi âm: ' + error.message);
+                    console.error(error);
+                }
+            }
+        }
+
+        function addTranscript(data) {
+            const transcripts = document.getElementById('transcripts');
+            
+            // Remove empty state if first transcript
+            if (transcriptCount === 0 && transcripts.querySelector('.empty-state')) {
+                transcripts.innerHTML = '';
+            }
+
+            if (data.type === 'transcription') {
+                // Create session transcript box if not exists
+                if (!sessionTranscriptBox) {
+                    const langLabel = data.language ? data.language.toUpperCase() : 'JA';
+                    sessionTranscriptBox = document.createElement('div');
+                    sessionTranscriptBox.className = 'transcript-item';
+                    sessionTranscriptBox.innerHTML = `
+                        <div class="transcript-label">📝 BẢN GỐC (${langLabel})</div>
+                        <div class="transcript-text original"></div>
+                        <div class="transcript-timestamp"></div>
+                    `;
+                    
+                    // Insert at the beginning
+                    if (transcripts.firstChild) {
+                        transcripts.insertBefore(sessionTranscriptBox, transcripts.firstChild);
+                    } else {
+                        transcripts.appendChild(sessionTranscriptBox);
+                    }
+                }
+                
+                // Append text to the box
+                const textDiv = sessionTranscriptBox.querySelector('.transcript-text');
+                const timestampDiv = sessionTranscriptBox.querySelector('.transcript-timestamp');
+                
+                if (textDiv.textContent.trim()) {
+                    textDiv.textContent += ' ' + data.text;
+                } else {
+                    textDiv.textContent = data.text;
+                }
+                timestampDiv.textContent = formatTimestamp(data.timestamp);
+                
+            } else if (data.type === 'translation') {
+                // Create session translation box if not exists
+                if (!sessionTranslationBox) {
+                    sessionTranslationBox = document.createElement('div');
+                    sessionTranslationBox.className = 'transcript-item translation';
+                    sessionTranslationBox.innerHTML = `
+                        <div class="transcript-label">🌐 BẢN DỊCH (TIẾNG VIỆT)</div>
+                        <div class="transcript-text translation"></div>
+                        <div class="transcript-timestamp"></div>
+                    `;
+                    
+                    // Insert after transcript box if exists, otherwise at beginning
+                    if (sessionTranscriptBox && transcripts.contains(sessionTranscriptBox)) {
+                        if (sessionTranscriptBox.nextSibling) {
+                            transcripts.insertBefore(sessionTranslationBox, sessionTranscriptBox.nextSibling);
+                        } else {
+                            transcripts.appendChild(sessionTranslationBox);
+                        }
+                    } else if (transcripts.firstChild) {
+                        transcripts.insertBefore(sessionTranslationBox, transcripts.firstChild);
+                    } else {
+                        transcripts.appendChild(sessionTranslationBox);
+                    }
+                }
+                
+                // Append text to the box
+                const textDiv = sessionTranslationBox.querySelector('.transcript-text');
+                const timestampDiv = sessionTranslationBox.querySelector('.transcript-timestamp');
+                
+                if (textDiv.textContent.trim()) {
+                    textDiv.textContent += ' ' + data.text;
+                } else {
+                    textDiv.textContent = data.text;
+                }
+                timestampDiv.textContent = formatTimestamp(data.timestamp);
+            }
+            
+            // Scroll to top to see latest content
+            transcripts.scrollTop = 0;
+            transcriptCount++;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString('vi-VN');
+            } catch {
+                return '';
+            }
+        }
+
+        async function connectWebRTC() {
+            try {
+                console.log('🔗 Connecting WebRTC...');
+                
+                // Get user media (microphone)
+                localStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: true,
+                    video: false 
+                });
+                console.log('✅ Microphone access granted');
+                
+                // Create RTCPeerConnection
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                // Add audio track
+                localStream.getTracks().forEach(track => {
+                    pc.addTrack(track, localStream);
+                });
+                
+                // Handle ICE candidates
+                // Queue candidates until we have the server's pc_id
+                let serverPcId = null;
+                const iceCandidatesQueue = [];
+                
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        const candidateData = {
+                            candidate: event.candidate.candidate,
+                            sdp_mline_index: event.candidate.sdpMLineIndex !== null && event.candidate.sdpMLineIndex !== undefined 
+                                ? event.candidate.sdpMLineIndex 
+                                : 0,
+                            sdp_mid: event.candidate.sdpMid || ""
+                        };
+
+                        if (serverPcId) {
+                            // If we already have pc_id, send immediately
+                            sendIceCandidate(serverPcId, candidateData);
+                        } else {
+                            // Otherwise queue it
+                            console.log('⏳ Queueing ICE candidate (waiting for pc_id)');
+                            iceCandidatesQueue.push(candidateData);
+                        }
+                    }
+                };
+                
+                // Helper to send ICE candidate
+                function sendIceCandidate(pcId, candidateData) {
+                    const candidatePayload = {
+                        pc_id: pcId,
+                        candidates: [candidateData]
+                    };
+                    
+                    fetch('/api/offer', {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(candidatePayload)
+                    }).catch(err => console.error('❌ ICE candidate error:', err));
+                }
+
+                // Handle connection state
+                pc.onconnectionstatechange = () => {
+                    console.log('WebRTC connection state:', pc.connectionState);
+                    if (pc.connectionState === 'connected') {
+                        console.log('✅ WebRTC connected - Ready to receive audio');
+                    }
+                };
+                
+                // Create offer
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                // Send offer to server
+                const offerPayload = {
+                    sdp: offer.sdp,
+                    type: offer.type,
+                    pc_id: 'meeting-minutes-pc'
+                };
+                
+                console.log('📤 Sending WebRTC offer:', { type: offerPayload.type, sdp_length: offerPayload.sdp.length });
+                
+                const response = await fetch('/api/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(offerPayload)
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('❌ WebRTC offer failed:', response.status, errorText);
+                    throw new Error(`Failed to connect WebRTC: ${response.status} - ${errorText}`);
+                }
+                
+                const answer = await response.json();
+                console.log('📥 Received WebRTC answer:', { type: answer.type, pc_id: answer.pc_id });
+                
+                if (!answer.sdp || !answer.type) {
+                    throw new Error('Invalid answer from server');
+                }
+                
+                // Store pc_id from server
+                serverPcId = answer.pc_id;
+                pc.pc_id = serverPcId; 
+                
+                // Flush queued candidates
+                if (iceCandidatesQueue.length > 0) {
+                    console.log(`📤 Flushing ${iceCandidatesQueue.length} queued ICE candidates`);
+                    iceCandidatesQueue.forEach(candidate => sendIceCandidate(serverPcId, candidate));
+                    iceCandidatesQueue.length = 0; // Clear queue
+                }
+                
+                await pc.setRemoteDescription(new RTCSessionDescription({
+                    type: answer.type,
+                    sdp: answer.sdp
+                }));
+                
+                console.log('✅ WebRTC offer/answer exchange complete');
+                
+            } catch (error) {
+                console.error('❌ WebRTC connection error:', error);
+                alert('Lỗi kết nối microphone: ' + error.message);
+                // Cleanup on error
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                }
+                if (pc) {
+                    pc.close();
+                }
+                throw error;
+            }
+        }
+        
+        function disconnectWebRTC() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            console.log('🔌 WebRTC disconnected');
+        }
+
+        // Disable language selection when recording
+        document.getElementById('language').addEventListener('change', function() {
+            if (isRecording) {
+                this.disabled = true;
+            } else {
+                this.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
+

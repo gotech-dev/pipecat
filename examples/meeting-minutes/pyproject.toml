@@ -1,0 +1,10 @@
+[project]
+name = "meeting-minutes"
+version = "0.1.0"
+description = "Meeting Minutes Bot - Ghi âm và dịch realtime cuộc họp"
+requires-python = ">=3.10"
+dependencies = [
+    "pipecat-ai[webrtc,gladia,silero,local-smart-turn-v3,runner]",
+    "python-dotenv>=1.0.0",
+]
+
