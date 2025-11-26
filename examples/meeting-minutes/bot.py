@@ -24,9 +24,10 @@ from typing import Optional
 
 from dotenv import load_dotenv
 try:
-    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-    from fastapi.responses import HTMLResponse
+    from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException, Depends
+    from fastapi.responses import HTMLResponse, RedirectResponse
     from fastapi.staticfiles import StaticFiles
+    from starlette.middleware.sessions import SessionMiddleware
 except ImportError:
     # FastAPI not available, will be imported when needed
     FastAPI = None
@@ -35,6 +36,10 @@ except ImportError:
     WebSocketDisconnect = None
     HTMLResponse = None
     StaticFiles = None
+    HTTPException = None
+    Depends = None
+    RedirectResponse = None
+    SessionMiddleware = None
 from loguru import logger
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
@@ -290,10 +295,48 @@ async def bot(runner_args: RunnerArguments):
     await run_bot(transport, runner_args)
 
 
+# Hardcoded credentials
+HARDCODED_EMAIL = "gotechjsc@gmail.com"
+HARDCODED_PASSWORD = "123456"
+
+# Function to check if user is authenticated
+async def check_auth(request: Request):
+    """Check if user is authenticated via session."""
+    session = request.session
+    return session.get("authenticated", False) == True
+
 # Function to setup custom routes (called by runner)
 def setup_custom_routes(app: FastAPI):
     """Setup custom API routes for meeting minutes."""
     global audio_recorder_instance
+    
+    # Add session middleware
+    app.add_middleware(SessionMiddleware, secret_key="meeting-minutes-secret-key-change-in-production")
+    
+    # Remove the default root redirect route that redirects to /client/
+    # This route is created by _setup_webrtc_routes and we want to override it
+    logger.info("🔍 Checking for default root routes to remove...")
+    routes_to_remove = []
+    for route in app.routes:
+        if hasattr(route, 'path') and route.path == '/' and hasattr(route, 'methods'):
+            # Check if it's a GET route that redirects
+            if 'GET' in route.methods:
+                route_info = f"path={route.path}, methods={route.methods}"
+                if hasattr(route, 'endpoint'):
+                    route_info += f", endpoint={route.endpoint.__name__ if hasattr(route.endpoint, '__name__') else 'unknown'}"
+                routes_to_remove.append(route)
+                logger.info(f"🗑️ Found default root redirect route: {route_info}")
+    
+    for route in routes_to_remove:
+        app.routes.remove(route)
+        logger.info(f"✅ Removed default root redirect route")
+    
+    # Log all remaining root routes for debugging
+    remaining_root_routes = [r for r in app.routes if hasattr(r, 'path') and r.path == '/']
+    if remaining_root_routes:
+        logger.info(f"⚠️ Found {len(remaining_root_routes)} remaining root routes after removal")
+    else:
+        logger.info("✅ No root routes remaining, ready to add our custom route")
     
     # Override /api/offer endpoint to handle dict parsing (FastAPI may not parse dataclass)
     from fastapi import Request as FastAPIRequest, BackgroundTasks, APIRouter
@@ -395,6 +438,10 @@ def setup_custom_routes(app: FastAPI):
     @app.post("/api/start-recording")
     async def start_recording(request: Request):
         """Start recording with specified language."""
+        # Check authentication
+        if not request.session.get("authenticated", False):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        
         data = await request.json()
         language_code = data.get("language", "ja")  # Default to Japanese
 
@@ -435,8 +482,12 @@ def setup_custom_routes(app: FastAPI):
         }
 
     @app.post("/api/stop-recording")
-    async def stop_recording():
+    async def stop_recording(request: Request):
         """Stop recording."""
+        # Check authentication
+        if not request.session.get("authenticated", False):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        
         recording_state["is_recording"] = False
         if audio_recorder_instance:
             await audio_recorder_instance.stop_recording()
@@ -448,8 +499,12 @@ def setup_custom_routes(app: FastAPI):
         return {"status": "stopped"}
 
     @app.get("/api/status")
-    async def get_status():
+    async def get_status(request: Request):
         """Get current recording status."""
+        # Check authentication
+        if not request.session.get("authenticated", False):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        
         return {
             "is_recording": recording_state["is_recording"],
             "language": recording_state["language"].value if recording_state["language"] else None,
@@ -458,6 +513,9 @@ def setup_custom_routes(app: FastAPI):
     @app.websocket("/ws/transcripts")
     async def websocket_transcripts(websocket: WebSocket):
         """WebSocket endpoint for receiving real-time transcripts."""
+        # Note: WebSocket doesn't have direct access to session cookies
+        # For now, we'll allow WebSocket connections but they should only be used
+        # from authenticated pages. In production, you might want to add token-based auth.
         await websocket.accept()
         transcript_broadcaster.add_websocket(websocket)
         logger.info("WebSocket client connected for transcripts")
@@ -471,18 +529,74 @@ def setup_custom_routes(app: FastAPI):
         finally:
             transcript_broadcaster.remove_websocket(websocket)
 
+    @app.post("/api/login")
+    async def login(request: Request):
+        """Handle login authentication."""
+        try:
+            data = await request.json()
+            email = data.get("email", "").strip()
+            password = data.get("password", "")
+            
+            # Check credentials
+            if email == HARDCODED_EMAIL and password == HARDCODED_PASSWORD:
+                # Set session
+                request.session["authenticated"] = True
+                request.session["email"] = email
+                logger.info(f"✅ User logged in: {email}")
+                return {"success": True, "message": "Đăng nhập thành công"}
+            else:
+                logger.warning(f"❌ Login failed for email: {email}")
+                raise HTTPException(status_code=401, detail="Email hoặc mật khẩu không đúng")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            raise HTTPException(status_code=500, detail="Lỗi server khi đăng nhập")
+    
+    @app.post("/api/logout")
+    async def logout(request: Request):
+        """Handle logout."""
+        request.session.clear()
+        return {"success": True, "message": "Đã đăng xuất"}
+    
+    # Register our root route - this will override the default one
+    # We need to ensure it's registered after removing the default route
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-    async def get_index():
-        """Serve the main HTML page."""
-        html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
+    async def get_index(request: Request):
+        """Serve the login page."""
+        # Check if already authenticated
+        if request.session.get("authenticated", False):
+            return RedirectResponse(url="/meeting", status_code=302)
+        
+        html_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
         if os.path.exists(html_path):
             with open(html_path, "r", encoding="utf-8") as f:
                 return HTMLResponse(content=f.read())
-        return HTMLResponse(content="<h1>Meeting Minutes Bot</h1><p>UI file not found</p>")
+        return HTMLResponse(content="<h1>Login Page</h1><p>Login file not found</p>")
+    
+    # Double-check: remove any remaining default root routes
+    # This ensures our route takes precedence
+    final_routes_to_remove = []
+    for route in app.routes:
+        if hasattr(route, 'path') and route.path == '/' and hasattr(route, 'methods'):
+            if 'GET' in route.methods:
+                # Skip our own route by checking if it's the one we just added
+                # Our route will have the function name 'get_index'
+                if hasattr(route, 'endpoint') and hasattr(route.endpoint, '__name__'):
+                    if route.endpoint.__name__ != 'get_index':
+                        final_routes_to_remove.append(route)
+    
+    for route in final_routes_to_remove:
+        app.routes.remove(route)
+        logger.info(f"✅ Removed additional default root route")
     
     @app.get("/meeting", response_class=HTMLResponse, include_in_schema=False)
-    async def get_meeting_ui():
-        """Alternative route for meeting UI."""
+    async def get_meeting_ui(request: Request):
+        """Meeting UI - requires authentication."""
+        # Check authentication
+        if not request.session.get("authenticated", False):
+            return RedirectResponse(url="/", status_code=302)
+        
         html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
         if os.path.exists(html_path):
             with open(html_path, "r", encoding="utf-8") as f:

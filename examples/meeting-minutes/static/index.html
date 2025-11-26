@@ -32,6 +32,7 @@
             color: white;
             padding: 30px;
             text-align: center;
+            position: relative;
         }
 
         .header h1 {
@@ -220,6 +221,7 @@
         <div class="header">
             <h1>🎙️ Meeting Minutes</h1>
             <p>Ghi âm và dịch realtime cuộc họp</p>
+            <button onclick="handleLogout()" style="position: absolute; top: 20px; right: 20px; background: rgba(255, 255, 255, 0.2); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;">Đăng xuất</button>
         </div>
 
         <div class="controls">
@@ -609,6 +611,23 @@
                 this.disabled = false;
             }
         });
+
+        // Logout function
+        async function handleLogout() {
+            try {
+                const response = await fetch('/api/logout', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    window.location.href = '/';
+                }
+            } catch (error) {
+                console.error('Logout error:', error);
+                // Redirect anyway
+                window.location.href = '/';
+            }
+        }
     </script>
 </body>
 </html>
