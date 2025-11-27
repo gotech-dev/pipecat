@@ -569,17 +569,24 @@ class GladiaSTTService(STTService):
                 if not message:
                     continue
                     
-                content = json.loads(message)
+                try:
+                    content = json.loads(message)
+                except json.JSONDecodeError as e:
+                    logger.warning(f"{self} Failed to parse JSON message: {e}, message: {message[:200]}")
+                    continue
                 
                 # Skip if content is None or not a dict
                 if not content or not isinstance(content, dict):
-                    logger.debug(f"{self} Received invalid message: {content}")
+                    logger.debug(f"{self} Received invalid message (not dict): {content}")
                     continue
 
                 message_type = content.get("type")
                 if not message_type:
                     logger.debug(f"{self} Message missing type field: {content}")
                     continue
+                
+                # Log message for debugging
+                logger.debug(f"{self} Received message type: {message_type}, content keys: {list(content.keys())}")
 
                 # Handle audio chunk acknowledgments
                 if message_type == "audio_chunk" and content.get("acknowledged"):
