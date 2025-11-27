@@ -631,13 +631,28 @@
                 
                 // Create RTCPeerConnection with STUN and TURN servers
                 // TURN server is needed when STUN alone cannot establish connection (behind NAT/firewall)
+                // Using self-hosted TURN server for better reliability
+                const TURN_SERVER_IP = '116.118.2.69'; // Server public IP
+                const TURN_USERNAME = 'turnuser';
+                const TURN_PASSWORD = 'turnpassword123';
+                
                 pc = new RTCPeerConnection({
                     iceServers: [
-                        // STUN server - helps discover public IP/port
+                        // STUN servers - helps discover public IP/port
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
-                        // Free public TURN servers - relay traffic when direct connection fails
-                        // Try multiple TURN servers for better reliability
+                        // Self-hosted TURN server (primary)
+                        { 
+                            urls: `turn:${TURN_SERVER_IP}:3478`,
+                            username: TURN_USERNAME,
+                            credential: TURN_PASSWORD
+                        },
+                        { 
+                            urls: `turn:${TURN_SERVER_IP}:3478?transport=tcp`,
+                            username: TURN_USERNAME,
+                            credential: TURN_PASSWORD
+                        },
+                        // Fallback: Free public TURN servers (backup)
                         { 
                             urls: 'turn:openrelay.metered.ca:80',
                             username: 'openrelayproject',
@@ -645,27 +660,6 @@
                         },
                         { 
                             urls: 'turn:openrelay.metered.ca:443',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        { 
-                            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        // Alternative TURN servers (if openrelay doesn't work)
-                        {
-                            urls: 'turn:relay.metered.ca:80',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        {
-                            urls: 'turn:relay.metered.ca:443',
-                            username: 'openrelayproject',
-                            credential: 'openrelayproject'
-                        },
-                        {
-                            urls: 'turn:relay.metered.ca:443?transport=tcp',
                             username: 'openrelayproject',
                             credential: 'openrelayproject'
                         }
