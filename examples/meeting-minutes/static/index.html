@@ -544,7 +544,34 @@
                     console.log('WebRTC connection state:', pc.connectionState);
                     if (pc.connectionState === 'connected') {
                         console.log('✅ WebRTC connected - Ready to receive audio');
+                    } else if (pc.connectionState === 'failed') {
+                        console.error('❌ WebRTC connection failed');
+                        // Try to restart connection
+                        setTimeout(() => {
+                            console.log('🔄 Attempting to reconnect...');
+                            disconnectWebRTC();
+                            connectWebRTC().catch(err => console.error('Reconnection error:', err));
+                        }, 2000);
+                    } else if (pc.connectionState === 'disconnected') {
+                        console.warn('⚠️ WebRTC disconnected');
                     }
+                };
+                
+                // Handle ICE connection state (more detailed)
+                pc.oniceconnectionstatechange = () => {
+                    console.log('ICE connection state:', pc.iceConnectionState);
+                    if (pc.iceConnectionState === 'failed') {
+                        console.error('❌ ICE connection failed - May need TURN server');
+                    } else if (pc.iceConnectionState === 'connected') {
+                        console.log('✅ ICE connection established');
+                    } else if (pc.iceConnectionState === 'checking') {
+                        console.log('🔍 ICE connection checking...');
+                    }
+                };
+                
+                // Handle ICE gathering state
+                pc.onicegatheringstatechange = () => {
+                    console.log('ICE gathering state:', pc.iceGatheringState);
                 };
                 
                 // Create offer
