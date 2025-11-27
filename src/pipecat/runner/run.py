@@ -72,9 +72,19 @@ import os
 import sys
 import uuid
 from contextlib import asynccontextmanager
-from http import HTTPMethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict, Union
+
+# HTTPMethod is only available in Python 3.11+, use compatibility shim for Python 3.10
+try:
+    from http import HTTPMethod
+except ImportError:
+    # Python < 3.11 compatibility
+    from enum import Enum
+
+    class HTTPMethod(Enum):
+        POST = "POST"
+        PATCH = "PATCH"
 
 import aiohttp
 from fastapi.responses import FileResponse, Response
