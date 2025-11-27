@@ -307,7 +307,8 @@ class GladiaSTTService(STTService):
         }
 
         # Add custom_metadata if provided
-        settings["custom_metadata"] = dict(self._params.custom_metadata or {})
+        custom_metadata = self._params.custom_metadata or {}
+        settings["custom_metadata"] = dict(custom_metadata) if isinstance(custom_metadata, dict) else {}
         settings["custom_metadata"]["pipecat"] = pipecat_version
 
         # Add endpointing parameters if provided
@@ -661,7 +662,9 @@ class GladiaSTTService(STTService):
             # Expected when closing the connection
             pass
         except Exception as e:
+            import traceback
             logger.error(f"{self} exception: {e}")
+            logger.error(f"{self} traceback: {traceback.format_exc()}")
             await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
 
     async def _maybe_reconnect(self) -> bool:
