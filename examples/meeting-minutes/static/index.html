@@ -253,6 +253,67 @@
         let pc = null; // RTCPeerConnection
         let localStream = null;
         
+        // Global function to check ICE candidates (for debugging)
+        async function checkIceCandidates() {
+            if (!pc) {
+                console.warn('⚠️ No WebRTC connection available');
+                return;
+            }
+            try {
+                const stats = await pc.getStats();
+                const candidates = [];
+                const candidatePairs = [];
+                
+                stats.forEach(report => {
+                    if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                        candidates.push({
+                            type: report.type,
+                            candidateType: report.candidateType,
+                            protocol: report.protocol,
+                            ip: report.ip || report.address,
+                            port: report.port,
+                            priority: report.priority
+                        });
+                    }
+                    if (report.type === 'candidate-pair') {
+                        candidatePairs.push({
+                            localCandidateId: report.localCandidateId,
+                            remoteCandidateId: report.remoteCandidateId,
+                            state: report.state,
+                            selected: report.selected,
+                            localCandidateType: report.localCandidateType,
+                            remoteCandidateType: report.remoteCandidateType
+                        });
+                    }
+                });
+                
+                console.log('📊 ICE Candidates:', candidates);
+                console.log('📊 Candidate Pairs:', candidatePairs);
+                
+                const selectedPair = candidatePairs.find(pair => pair.selected);
+                if (selectedPair) {
+                    console.log('✅ Selected candidate pair:', selectedPair);
+                    console.log('Local type:', selectedPair.localCandidateType);
+                    console.log('Remote type:', selectedPair.remoteCandidateType);
+                } else {
+                    console.warn('⚠️ No candidate pair selected yet');
+                }
+                
+                // Check if TURN is being used
+                const turnCandidates = candidates.filter(c => 
+                    c.candidateType === 'relay' || c.candidateType === 'srflx'
+                );
+                if (turnCandidates.length > 0) {
+                    console.log('🔄 TURN/STUN candidates found:', turnCandidates.length);
+                    console.log('TURN/STUN candidates:', turnCandidates);
+                } else {
+                    console.warn('⚠️ No TURN/STUN candidates - may need TURN server');
+                }
+            } catch (error) {
+                console.error('Error checking ICE candidates:', error);
+            }
+        }
+        
         // Session boxes - reset when starting new recording
         let sessionTranscriptBox = null;
         let sessionTranslationBox = null;
@@ -563,14 +624,17 @@
                     if (pc.iceConnectionState === 'failed') {
                         console.error('❌ ICE connection failed - May need TURN server');
                         // Debug: Check all candidates
-                        checkIceCandidates();
+                        setTimeout(() => checkIceCandidates(), 1000);
                     } else if (pc.iceConnectionState === 'connected') {
                         console.log('✅ ICE connection established');
-                        checkIceCandidates();
+                        setTimeout(() => checkIceCandidates(), 1000);
                     } else if (pc.iceConnectionState === 'checking') {
                         console.log('🔍 ICE connection checking...');
+                        // Check candidates after 2 seconds of checking
+                        setTimeout(() => checkIceCandidates(), 2000);
                     } else if (pc.iceConnectionState === 'disconnected') {
                         console.warn('⚠️ ICE connection disconnected');
+                        checkIceCandidates();
                     }
                 };
                 
@@ -579,65 +643,9 @@
                     console.log('ICE gathering state:', pc.iceGatheringState);
                     if (pc.iceGatheringState === 'complete') {
                         console.log('✅ ICE gathering complete');
-                        checkIceCandidates();
+                        setTimeout(() => checkIceCandidates(), 500);
                     }
                 };
-                
-                // Function to check ICE candidates for debugging
-                async function checkIceCandidates() {
-                    try {
-                        const stats = await pc.getStats();
-                        const candidates = [];
-                        const candidatePairs = [];
-                        
-                        stats.forEach(report => {
-                            if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
-                                candidates.push({
-                                    type: report.type,
-                                    candidateType: report.candidateType,
-                                    protocol: report.protocol,
-                                    ip: report.ip || report.address,
-                                    port: report.port,
-                                    priority: report.priority
-                                });
-                            }
-                            if (report.type === 'candidate-pair') {
-                                candidatePairs.push({
-                                    localCandidateId: report.localCandidateId,
-                                    remoteCandidateId: report.remoteCandidateId,
-                                    state: report.state,
-                                    selected: report.selected,
-                                    localCandidateType: report.localCandidateType,
-                                    remoteCandidateType: report.remoteCandidateType
-                                });
-                            }
-                        });
-                        
-                        console.log('📊 ICE Candidates:', candidates);
-                        console.log('📊 Candidate Pairs:', candidatePairs);
-                        
-                        const selectedPair = candidatePairs.find(pair => pair.selected);
-                        if (selectedPair) {
-                            console.log('✅ Selected candidate pair:', selectedPair);
-                            console.log('Local type:', selectedPair.localCandidateType);
-                            console.log('Remote type:', selectedPair.remoteCandidateType);
-                        } else {
-                            console.warn('⚠️ No candidate pair selected yet');
-                        }
-                        
-                        // Check if TURN is being used
-                        const turnCandidates = candidates.filter(c => 
-                            c.candidateType === 'relay' || c.candidateType === 'srflx'
-                        );
-                        if (turnCandidates.length > 0) {
-                            console.log('🔄 TURN/STUN candidates found:', turnCandidates.length);
-                        } else {
-                            console.warn('⚠️ No TURN/STUN candidates - may need TURN server');
-                        }
-                    } catch (error) {
-                        console.error('Error checking ICE candidates:', error);
-                    }
-                }
                 
                 // Create offer
                 const offer = await pc.createOffer();
