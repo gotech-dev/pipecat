@@ -565,60 +565,98 @@ class GladiaSTTService(STTService):
     async def _receive_task_handler(self):
         try:
             async for message in self._websocket:
+                if not message:
+                    continue
+                    
                 content = json.loads(message)
+                
+                # Skip if content is None or not a dict
+                if not content or not isinstance(content, dict):
+                    logger.debug(f"{self} Received invalid message: {content}")
+                    continue
+
+                message_type = content.get("type")
+                if not message_type:
+                    logger.debug(f"{self} Message missing type field: {content}")
+                    continue
 
                 # Handle audio chunk acknowledgments
-                if content["type"] == "audio_chunk" and content.get("acknowledged"):
-                    byte_range = content["data"]["byte_range"]
-                    async with self._buffer_lock:
-                        # Update bytes sent and trim acknowledged data from buffer
-                        end_byte = byte_range[1]
-                        if end_byte > self._bytes_sent:
-                            trim_size = end_byte - self._bytes_sent
-                            self._audio_buffer = self._audio_buffer[trim_size:]
-                            self._bytes_sent = end_byte
-
-                elif content["type"] == "transcript":
-                    utterance = content["data"]["utterance"]
-                    language = utterance["language"]
-                    transcript = utterance["text"]
-                    is_final = content["data"]["is_final"]
-                    if is_final:
-                        await self.push_frame(
-                            TranscriptionFrame(
-                                transcript,
-                                self._user_id,
-                                time_now_iso8601(),
-                                language,
-                                result=content,
-                            )
-                        )
-                        await self._handle_transcription(
-                            transcript=transcript,
-                            is_final=is_final,
-                            language=language,
-                        )
+                if message_type == "audio_chunk" and content.get("acknowledged"):
+                    data = content.get("data")
+                    if data and isinstance(data, dict):
+                        byte_range = data.get("byte_range")
+                        if byte_range and isinstance(byte_range, list) and len(byte_range) >= 2:
+                            async with self._buffer_lock:
+                                # Update bytes sent and trim acknowledged data from buffer
+                                end_byte = byte_range[1]
+                                if end_byte > self._bytes_sent:
+                                    trim_size = end_byte - self._bytes_sent
+                                    self._audio_buffer = self._audio_buffer[trim_size:]
+                                    self._bytes_sent = end_byte
+                        else:
+                            logger.debug(f"{self} Invalid byte_range in audio_chunk: {byte_range}")
                     else:
-                        await self.push_frame(
-                            InterimTranscriptionFrame(
-                                transcript,
-                                self._user_id,
-                                time_now_iso8601(),
-                                language,
-                                result=content,
-                            )
-                        )
-                elif content["type"] == "translation":
-                    translated_utterance = content["data"]["translated_utterance"]
-                    original_language = content["data"]["original_language"]
-                    translated_language = translated_utterance["language"]
-                    translation = translated_utterance["text"]
-                    if translated_language != original_language:
-                        await self.push_frame(
-                            TranslationFrame(
-                                translation, "", time_now_iso8601(), translated_language
-                            )
-                        )
+                        logger.debug(f"{self} Missing or invalid data in audio_chunk: {data}")
+
+                elif message_type == "transcript":
+                    data = content.get("data")
+                    if data and isinstance(data, dict):
+                        utterance = data.get("utterance")
+                        if utterance and isinstance(utterance, dict):
+                            language = utterance.get("language")
+                            transcript = utterance.get("text", "")
+                            is_final = data.get("is_final", False)
+                            if is_final:
+                                await self.push_frame(
+                                    TranscriptionFrame(
+                                        transcript,
+                                        self._user_id,
+                                        time_now_iso8601(),
+                                        language,
+                                        result=content,
+                                    )
+                                )
+                                await self._handle_transcription(
+                                    transcript=transcript,
+                                    is_final=is_final,
+                                    language=language,
+                                )
+                            else:
+                                await self.push_frame(
+                                    InterimTranscriptionFrame(
+                                        transcript,
+                                        self._user_id,
+                                        time_now_iso8601(),
+                                        language,
+                                        result=content,
+                                    )
+                                )
+                        else:
+                            logger.debug(f"{self} Missing or invalid utterance in transcript: {utterance}")
+                    else:
+                        logger.debug(f"{self} Missing or invalid data in transcript: {data}")
+
+                elif message_type == "translation":
+                    data = content.get("data")
+                    if data and isinstance(data, dict):
+                        translated_utterance = data.get("translated_utterance")
+                        original_language = data.get("original_language")
+                        if translated_utterance and isinstance(translated_utterance, dict):
+                            translated_language = translated_utterance.get("language")
+                            translation = translated_utterance.get("text", "")
+                            if translated_language and translated_language != original_language:
+                                await self.push_frame(
+                                    TranslationFrame(
+                                        translation, "", time_now_iso8601(), translated_language
+                                    )
+                                )
+                        else:
+                            logger.debug(f"{self} Missing or invalid translated_utterance: {translated_utterance}")
+                    else:
+                        logger.debug(f"{self} Missing or invalid data in translation: {data}")
+                else:
+                    # Unknown message type, log for debugging
+                    logger.debug(f"{self} Received unknown message type: {message_type}")
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass

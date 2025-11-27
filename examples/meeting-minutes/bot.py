@@ -254,7 +254,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        # Tăng idle timeout lên 1 giờ (3600 giây) để tránh disconnect khi không có audio
+        # Hoặc set None để disable idle timeout
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs if runner_args.pipeline_idle_timeout_secs > 0 else 3600,
+        # Không tự động cancel khi idle (để giữ connection mở)
+        cancel_on_idle_timeout=False,
     )
 
     @transport.event_handler("on_client_connected")
