@@ -285,6 +285,7 @@
                             remoteCandidateId: report.remoteCandidateId,
                             state: report.state,
                             selected: report.selected,
+                            nominated: report.nominated,
                             localCandidateType: report.localCandidateType,
                             remoteCandidateType: report.remoteCandidateType
                         });
@@ -303,22 +304,36 @@
                 // Detailed candidate pairs info
                 console.log('📋 Detailed Candidate Pairs:');
                 candidatePairs.forEach((pair, i) => {
-                    console.log(`  ${i+1}. State: ${pair.state}, Selected: ${pair.selected}, Local: ${pair.localCandidateType}, Remote: ${pair.remoteCandidateType}`);
+                    console.log(`  ${i+1}. State: ${pair.state}, Selected: ${pair.selected}, Nominated: ${pair.nominated}, Local: ${pair.localCandidateType}, Remote: ${pair.remoteCandidateType}`);
                 });
                 
-                const selectedPair = candidatePairs.find(pair => pair.selected);
+                const selectedPair = candidatePairs.find(pair => pair.selected || pair.nominated);
                 if (selectedPair) {
                     console.log('✅ Selected candidate pair:', selectedPair);
                     console.log('Local type:', selectedPair.localCandidateType);
                     console.log('Remote type:', selectedPair.remoteCandidateType);
                 } else {
-                    console.warn('⚠️ No candidate pair selected yet');
+                    // Try to find a succeeded pair if no nominated pair found yet (e.g. early connection state)
+                    const succeededPair = candidatePairs.find(pair => pair.state === 'succeeded');
+                    
+                    if (succeededPair) {
+                        console.log('✅ Succeeded candidate pair found (not yet nominated/selected):', succeededPair);
+                    } else {
+                        console.warn('⚠️ No candidate pair selected or succeeded yet');
+                    }
+
                     // Check why no pair is selected
                     const failedPairs = candidatePairs.filter(p => p.state === 'failed');
                     const inProgressPairs = candidatePairs.filter(p => p.state === 'in-progress');
                     const waitingPairs = candidatePairs.filter(p => p.state === 'waiting');
+                    
                     if (failedPairs.length > 0) {
-                        console.error('❌ Failed pairs:', failedPairs.length);
+                        // Only log as error if NO succeeded pair exists
+                        if (succeededPair) {
+                             console.warn('⚠️ Some pairs failed (expected, using succeeded pair):', failedPairs.length);
+                        } else {
+                             console.error('❌ Failed pairs:', failedPairs.length);
+                        }
                     }
                     if (inProgressPairs.length > 0) {
                         console.log('⏳ In-progress pairs:', inProgressPairs.length);
