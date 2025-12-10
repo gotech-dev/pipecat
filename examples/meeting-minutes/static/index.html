@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,7 +24,7 @@
             margin: 0 auto;
             background: white;
             border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             overflow: hidden;
         }
 
@@ -58,7 +59,8 @@
             flex-wrap: wrap;
         }
 
-        select, button {
+        select,
+        button {
             padding: 12px 24px;
             font-size: 16px;
             border: none;
@@ -142,6 +144,7 @@
                 opacity: 0;
                 transform: translateX(-20px);
             }
+
             to {
                 opacity: 1;
                 transform: translateX(0);
@@ -216,12 +219,15 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
             <h1>🎙️ Meeting Minutes</h1>
             <p>Ghi âm và dịch realtime cuộc họp</p>
-            <button onclick="handleLogout()" style="position: absolute; top: 20px; right: 20px; background: rgba(255, 255, 255, 0.2); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;">Đăng xuất</button>
+            <button onclick="handleLogout()"
+                style="position: absolute; top: 20px; right: 20px; background: rgba(255, 255, 255, 0.2); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px;">Đăng
+                xuất</button>
         </div>
 
         <div class="controls">
@@ -253,7 +259,64 @@
         let pc = null; // RTCPeerConnection
         let localStream = null;
         let lastIceStats = null; // Store last ICE stats for debugging
-        
+        let connectionMonitorInterval = null; // For monitoring connection health
+
+        // Connection monitoring functions
+        function startConnectionMonitoring() {
+            if (connectionMonitorInterval) {
+                clearInterval(connectionMonitorInterval);
+            }
+
+            console.log('🔍 Starting connection monitoring...');
+            connectionMonitorInterval = setInterval(async () => {
+                if (!pc || !isRecording) {
+                    stopConnectionMonitoring();
+                    return;
+                }
+
+                const state = pc.connectionState;
+                const iceState = pc.iceConnectionState;
+
+                // Log current state
+                console.log(`📊 Connection health: WebRTC=${state}, ICE=${iceState}`);
+
+                // Check if connection is healthy
+                if (state === 'connected' && iceState === 'connected') {
+                    // Connection is healthy, check stats
+                    try {
+                        const stats = await pc.getStats();
+                        let hasActiveConnection = false;
+
+                        stats.forEach(report => {
+                            if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                                hasActiveConnection = true;
+                                // Log bandwidth if available
+                                if (report.availableOutgoingBitrate) {
+                                    console.log(`📈 Bandwidth: ${Math.round(report.availableOutgoingBitrate / 1000)} kbps`);
+                                }
+                            }
+                        });
+
+                        if (!hasActiveConnection) {
+                            console.warn('⚠️ No active connection found in stats');
+                        }
+                    } catch (err) {
+                        console.error('Error checking connection stats:', err);
+                    }
+                } else if (state === 'disconnected' || state === 'failed') {
+                    console.error('❌ Connection unhealthy, stopping monitoring');
+                    stopConnectionMonitoring();
+                }
+            }, 5000); // Check every 5 seconds
+        }
+
+        function stopConnectionMonitoring() {
+            if (connectionMonitorInterval) {
+                console.log('⏹️ Stopping connection monitoring');
+                clearInterval(connectionMonitorInterval);
+                connectionMonitorInterval = null;
+            }
+        }
         // Global function to check ICE candidates (for debugging)
         async function checkIceCandidates() {
             if (!pc) {
@@ -265,12 +328,14 @@
             }
             try {
                 const stats = await pc.getStats();
-                const candidates = [];
+                const candidatesMap = new Map(); // Map to store candidates by ID
                 const candidatePairs = [];
-                
+
+                // First pass: collect all candidates
                 stats.forEach(report => {
                     if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
-                        candidates.push({
+                        candidatesMap.set(report.id, {
+                            id: report.id,
                             type: report.type,
                             candidateType: report.candidateType,
                             protocol: report.protocol,
@@ -279,45 +344,64 @@
                             priority: report.priority
                         });
                     }
+                });
+
+                // Second pass: collect candidate pairs with proper type lookup
+                stats.forEach(report => {
                     if (report.type === 'candidate-pair') {
+                        const localCandidate = candidatesMap.get(report.localCandidateId);
+                        const remoteCandidate = candidatesMap.get(report.remoteCandidateId);
+
                         candidatePairs.push({
                             localCandidateId: report.localCandidateId,
                             remoteCandidateId: report.remoteCandidateId,
                             state: report.state,
                             selected: report.selected,
                             nominated: report.nominated,
-                            localCandidateType: report.localCandidateType,
-                            remoteCandidateType: report.remoteCandidateType
+                            localCandidateType: localCandidate?.candidateType,
+                            remoteCandidateType: remoteCandidate?.candidateType,
+                            availableOutgoingBitrate: report.availableOutgoingBitrate,
+                            bytesReceived: report.bytesReceived,
+                            bytesSent: report.bytesSent
                         });
                     }
                 });
-                
+
+                const candidates = Array.from(candidatesMap.values());
+
                 console.log('📊 ICE Candidates:', candidates);
                 console.log('📊 Candidate Pairs:', candidatePairs);
-                
+
                 // Detailed candidate info
                 console.log('📋 Detailed Candidates:');
                 candidates.forEach((c, i) => {
-                    console.log(`  ${i+1}. ${c.type} - Type: ${c.candidateType}, Protocol: ${c.protocol}, IP: ${c.ip}, Port: ${c.port}`);
+                    console.log(`  ${i + 1}. ${c.type} - Type: ${c.candidateType}, Protocol: ${c.protocol}, IP: ${c.ip}, Port: ${c.port}`);
                 });
-                
+
                 // Detailed candidate pairs info
                 console.log('📋 Detailed Candidate Pairs:');
                 candidatePairs.forEach((pair, i) => {
-                    console.log(`  ${i+1}. State: ${pair.state}, Selected: ${pair.selected}, Nominated: ${pair.nominated}, Local: ${pair.localCandidateType}, Remote: ${pair.remoteCandidateType}`);
+                    console.log(`  ${i + 1}. State: ${pair.state}, Selected: ${pair.selected}, Nominated: ${pair.nominated}, Local: ${pair.localCandidateType}, Remote: ${pair.remoteCandidateType}`);
                 });
-                
+
                 const selectedPair = candidatePairs.find(pair => pair.selected || pair.nominated);
                 if (selectedPair) {
                     console.log('✅ Selected candidate pair:', selectedPair);
                     console.log('Local type:', selectedPair.localCandidateType);
                     console.log('Remote type:', selectedPair.remoteCandidateType);
+
+                    // Check if using TURN
+                    if (selectedPair.localCandidateType === 'relay' || selectedPair.remoteCandidateType === 'relay') {
+                        console.log('🔄 Using TURN relay connection');
+                    }
                 } else {
-                    // Try to find a succeeded pair if no nominated pair found yet (e.g. early connection state)
+                    // Try to find a succeeded pair if no nominated pair found yet
                     const succeededPair = candidatePairs.find(pair => pair.state === 'succeeded');
-                    
+
                     if (succeededPair) {
                         console.log('✅ Succeeded candidate pair found (not yet nominated/selected):', succeededPair);
+                        console.log('Local type:', succeededPair.localCandidateType);
+                        console.log('Remote type:', succeededPair.remoteCandidateType);
                     } else {
                         console.warn('⚠️ No candidate pair selected or succeeded yet');
                     }
@@ -326,13 +410,12 @@
                     const failedPairs = candidatePairs.filter(p => p.state === 'failed');
                     const inProgressPairs = candidatePairs.filter(p => p.state === 'in-progress');
                     const waitingPairs = candidatePairs.filter(p => p.state === 'waiting');
-                    
+
                     if (failedPairs.length > 0) {
-                        // Only log as error if NO succeeded pair exists
                         if (succeededPair) {
-                             console.warn('⚠️ Some pairs failed (expected, using succeeded pair):', failedPairs.length);
+                            console.warn('⚠️ Some pairs failed (expected, using succeeded pair):', failedPairs.length);
                         } else {
-                             console.error('❌ Failed pairs:', failedPairs.length);
+                            console.error('❌ Failed pairs:', failedPairs.length);
                         }
                     }
                     if (inProgressPairs.length > 0) {
@@ -342,25 +425,25 @@
                         console.log('⏳ Waiting pairs:', waitingPairs.length);
                     }
                 }
-                
+
                 // Check if TURN (relay) is being used
                 const relayCandidates = candidates.filter(c => c.candidateType === 'relay');
                 const srflxCandidates = candidates.filter(c => c.candidateType === 'srflx');
                 const hostCandidates = candidates.filter(c => c.candidateType === 'host');
-                
+
                 console.log(`📊 Candidate Summary: Host: ${hostCandidates.length}, STUN (srflx): ${srflxCandidates.length}, TURN (relay): ${relayCandidates.length}`);
-                
+
                 if (relayCandidates.length > 0) {
                     console.log('✅ TURN (relay) candidates found:', relayCandidates.length);
                     console.log('TURN candidates:', relayCandidates);
                 } else {
                     console.warn('⚠️ No TURN (relay) candidates - TURN server may not be working');
                 }
-                
+
                 if (srflxCandidates.length > 0) {
                     console.log('ℹ️ STUN (srflx) candidates found:', srflxCandidates.length);
                 }
-                
+
                 // Save stats for later inspection
                 lastIceStats = {
                     candidates,
@@ -368,55 +451,15 @@
                     selectedPair,
                     relayCandidates: relayCandidates.length,
                     srflxCandidates: srflxCandidates.length,
-                    hostCandidates: hostCandidates.length
+                    hostCandidates: hostCandidates.length,
+                    timestamp: new Date().toISOString()
                 };
-                
-                // Also get detailed stats
-                try {
-                    const detailedStats = await pc.getStats();
-                    const detailedCandidates = [];
-                    const detailedPairs = [];
-                    
-                    detailedStats.forEach(report => {
-                        if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
-                            detailedCandidates.push({
-                                type: report.type,
-                                candidateType: report.candidateType,
-                                protocol: report.protocol,
-                                ip: report.ip || report.address,
-                                port: report.port,
-                                priority: report.priority,
-                                url: report.url
-                            });
-                        }
-                        if (report.type === 'candidate-pair') {
-                            detailedPairs.push({
-                                state: report.state,
-                                selected: report.selected,
-                                localCandidateType: report.localCandidateType,
-                                remoteCandidateType: report.remoteCandidateType,
-                                availableOutgoingBitrate: report.availableOutgoingBitrate,
-                                availableIncomingBitrate: report.availableIncomingBitrate,
-                                bytesReceived: report.bytesReceived,
-                                bytesSent: report.bytesSent
-                            });
-                        }
-                    });
-                    
-                    console.log('🔍 Detailed ICE Stats:');
-                    console.log('  Candidates:', detailedCandidates);
-                    console.log('  Pairs:', detailedPairs);
-                    
-                    lastIceStats.detailedCandidates = detailedCandidates;
-                    lastIceStats.detailedPairs = detailedPairs;
-                } catch (err) {
-                    console.warn('Could not get detailed stats:', err);
-                }
+
             } catch (error) {
                 console.error('Error checking ICE candidates:', error);
             }
         }
-        
+
         // Function to view last saved stats
         function viewLastIceStats() {
             if (lastIceStats) {
@@ -427,7 +470,7 @@
                 return null;
             }
         }
-        
+
         // Session boxes - reset when starting new recording
         let sessionTranscriptBox = null;
         let sessionTranslationBox = null;
@@ -443,8 +486,8 @@
                 try {
                     const response = await fetch('/api/start-recording', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({language: lang})
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ language: lang })
                     });
 
                     if (!response.ok) {
@@ -491,12 +534,12 @@
                     btn.classList.add('recording');
                     status.textContent = `🔴 Đang ghi âm - Ngôn ngữ: ${lang === 'ja' ? 'Tiếng Nhật' : 'Tiếng Anh'}`;
                     status.classList.add('recording');
-                    
+
                     // Clear empty state
                     if (transcriptCount === 0) {
                         transcripts.innerHTML = '';
                     }
-                    
+
                     // Reset session boxes for new recording
                     sessionTranscriptBox = null;
                     sessionTranslationBox = null;
@@ -509,11 +552,11 @@
             } else {
                 // Stop recording
                 try {
-                    await fetch('/api/stop-recording', {method: 'POST'});
-                    
+                    await fetch('/api/stop-recording', { method: 'POST' });
+
                     // Disconnect WebRTC
                     disconnectWebRTC();
-                    
+
                     if (ws) {
                         ws.close();
                         ws = null;
@@ -523,7 +566,7 @@
                     btn.classList.remove('recording');
                     status.textContent = '✅ Đã dừng ghi âm';
                     status.classList.remove('recording');
-                    
+
                     setTimeout(() => {
                         status.style.display = 'none';
                     }, 3000);
@@ -538,7 +581,7 @@
 
         function addTranscript(data) {
             const transcripts = document.getElementById('transcripts');
-            
+
             // Remove empty state if first transcript
             if (transcriptCount === 0 && transcripts.querySelector('.empty-state')) {
                 transcripts.innerHTML = '';
@@ -555,7 +598,7 @@
                         <div class="transcript-text original"></div>
                         <div class="transcript-timestamp"></div>
                     `;
-                    
+
                     // Insert at the beginning
                     if (transcripts.firstChild) {
                         transcripts.insertBefore(sessionTranscriptBox, transcripts.firstChild);
@@ -563,18 +606,18 @@
                         transcripts.appendChild(sessionTranscriptBox);
                     }
                 }
-                
+
                 // Append text to the box
                 const textDiv = sessionTranscriptBox.querySelector('.transcript-text');
                 const timestampDiv = sessionTranscriptBox.querySelector('.transcript-timestamp');
-                
+
                 if (textDiv.textContent.trim()) {
                     textDiv.textContent += ' ' + data.text;
                 } else {
                     textDiv.textContent = data.text;
                 }
                 timestampDiv.textContent = formatTimestamp(data.timestamp);
-                
+
             } else if (data.type === 'translation') {
                 // Create session translation box if not exists
                 if (!sessionTranslationBox) {
@@ -585,7 +628,7 @@
                         <div class="transcript-text translation"></div>
                         <div class="transcript-timestamp"></div>
                     `;
-                    
+
                     // Insert after transcript box if exists, otherwise at beginning
                     if (sessionTranscriptBox && transcripts.contains(sessionTranscriptBox)) {
                         if (sessionTranscriptBox.nextSibling) {
@@ -599,11 +642,11 @@
                         transcripts.appendChild(sessionTranslationBox);
                     }
                 }
-                
+
                 // Append text to the box
                 const textDiv = sessionTranslationBox.querySelector('.transcript-text');
                 const timestampDiv = sessionTranslationBox.querySelector('.transcript-timestamp');
-                
+
                 if (textDiv.textContent.trim()) {
                     textDiv.textContent += ' ' + data.text;
                 } else {
@@ -611,7 +654,7 @@
                 }
                 timestampDiv.textContent = formatTimestamp(data.timestamp);
             }
-            
+
             // Scroll to top to see latest content
             transcripts.scrollTop = 0;
             transcriptCount++;
@@ -636,44 +679,44 @@
         async function connectWebRTC() {
             try {
                 console.log('🔗 Connecting WebRTC...');
-                
+
                 // Get user media (microphone)
-                localStream = await navigator.mediaDevices.getUserMedia({ 
+                localStream = await navigator.mediaDevices.getUserMedia({
                     audio: true,
-                    video: false 
+                    video: false
                 });
                 console.log('✅ Microphone access granted');
-                
+
                 // Create RTCPeerConnection with STUN and TURN servers
                 // TURN server is needed when STUN alone cannot establish connection (behind NAT/firewall)
                 // Using self-hosted TURN server for better reliability
                 const TURN_SERVER_IP = '116.118.2.69'; // Server public IP
                 const TURN_USERNAME = 'turnuser';
                 const TURN_PASSWORD = 'turnpassword123';
-                
+
                 pc = new RTCPeerConnection({
                     iceServers: [
                         // STUN servers - helps discover public IP/port
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
                         // Self-hosted TURN server (primary)
-                        { 
+                        {
                             urls: `turn:${TURN_SERVER_IP}:3478`,
                             username: TURN_USERNAME,
                             credential: TURN_PASSWORD
                         },
-                        { 
+                        {
                             urls: `turn:${TURN_SERVER_IP}:3478?transport=tcp`,
                             username: TURN_USERNAME,
                             credential: TURN_PASSWORD
                         },
                         // Fallback: Free public TURN servers (backup)
-                        { 
+                        {
                             urls: 'turn:openrelay.metered.ca:80',
                             username: 'openrelayproject',
                             credential: 'openrelayproject'
                         },
-                        { 
+                        {
                             urls: 'turn:openrelay.metered.ca:443',
                             username: 'openrelayproject',
                             credential: 'openrelayproject'
@@ -682,23 +725,23 @@
                     // Increase ICE candidate gathering timeout
                     iceCandidatePoolSize: 10
                 });
-                
+
                 // Add audio track
                 localStream.getTracks().forEach(track => {
                     pc.addTrack(track, localStream);
                 });
-                
+
                 // Handle ICE candidates
                 // Queue candidates until we have the server's pc_id
                 let serverPcId = null;
                 const iceCandidatesQueue = [];
-                
+
                 pc.onicecandidate = (event) => {
                     if (event.candidate) {
                         const candidateData = {
                             candidate: event.candidate.candidate,
-                            sdp_mline_index: event.candidate.sdpMLineIndex !== null && event.candidate.sdpMLineIndex !== undefined 
-                                ? event.candidate.sdpMLineIndex 
+                            sdp_mline_index: event.candidate.sdpMLineIndex !== null && event.candidate.sdpMLineIndex !== undefined
+                                ? event.candidate.sdpMLineIndex
                                 : 0,
                             sdp_mid: event.candidate.sdpMid || ""
                         };
@@ -713,14 +756,14 @@
                         }
                     }
                 };
-                
+
                 // Helper to send ICE candidate
                 function sendIceCandidate(pcId, candidateData) {
                     const candidatePayload = {
                         pc_id: pcId,
                         candidates: [candidateData]
                     };
-                    
+
                     fetch('/api/offer', {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
@@ -733,19 +776,35 @@
                     console.log('WebRTC connection state:', pc.connectionState);
                     if (pc.connectionState === 'connected') {
                         console.log('✅ WebRTC connected - Ready to receive audio');
+                        // Start monitoring connection health
+                        startConnectionMonitoring();
                     } else if (pc.connectionState === 'failed') {
                         console.error('❌ WebRTC connection failed');
-                        // Try to restart connection
-                        setTimeout(() => {
-                            console.log('🔄 Attempting to reconnect...');
-                            disconnectWebRTC();
-                            connectWebRTC().catch(err => console.error('Reconnection error:', err));
-                        }, 2000);
+                        stopConnectionMonitoring();
+                        // Don't auto-reconnect, let user retry manually
+                        alert('Kết nối WebRTC thất bại. Vui lòng thử lại.');
                     } else if (pc.connectionState === 'disconnected') {
                         console.warn('⚠️ WebRTC disconnected');
+                        stopConnectionMonitoring();
+                        // Check if we should reconnect
+                        if (isRecording) {
+                            console.log('🔄 Attempting to reconnect...');
+                            setTimeout(() => {
+                                if (isRecording && pc && pc.connectionState === 'disconnected') {
+                                    disconnectWebRTC();
+                                    connectWebRTC().catch(err => {
+                                        console.error('Reconnection error:', err);
+                                        alert('Không thể kết nối lại. Vui lòng dừng và bắt đầu lại.');
+                                    });
+                                }
+                            }, 2000);
+                        }
+                    } else if (pc.connectionState === 'closed') {
+                        console.log('🔌 WebRTC connection closed');
+                        stopConnectionMonitoring();
                     }
                 };
-                
+
                 // Handle ICE connection state (more detailed)
                 pc.oniceconnectionstatechange = () => {
                     console.log('ICE connection state:', pc.iceConnectionState);
@@ -765,7 +824,7 @@
                         checkIceCandidates();
                     }
                 };
-                
+
                 // Handle ICE gathering state
                 pc.onicegatheringstatechange = () => {
                     console.log('ICE gathering state:', pc.iceGatheringState);
@@ -774,57 +833,57 @@
                         setTimeout(() => checkIceCandidates(), 500);
                     }
                 };
-                
+
                 // Create offer
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
-                
+
                 // Send offer to server
                 const offerPayload = {
                     sdp: offer.sdp,
                     type: offer.type,
                     pc_id: 'meeting-minutes-pc'
                 };
-                
+
                 console.log('📤 Sending WebRTC offer:', { type: offerPayload.type, sdp_length: offerPayload.sdp.length });
-                
+
                 const response = await fetch('/api/offer', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(offerPayload)
                 });
-                
+
                 if (!response.ok) {
                     const errorText = await response.text();
                     console.error('❌ WebRTC offer failed:', response.status, errorText);
                     throw new Error(`Failed to connect WebRTC: ${response.status} - ${errorText}`);
                 }
-                
+
                 const answer = await response.json();
                 console.log('📥 Received WebRTC answer:', { type: answer.type, pc_id: answer.pc_id });
-                
+
                 if (!answer.sdp || !answer.type) {
                     throw new Error('Invalid answer from server');
                 }
-                
+
                 // Store pc_id from server
                 serverPcId = answer.pc_id;
-                pc.pc_id = serverPcId; 
-                
+                pc.pc_id = serverPcId;
+
                 // Flush queued candidates
                 if (iceCandidatesQueue.length > 0) {
                     console.log(`📤 Flushing ${iceCandidatesQueue.length} queued ICE candidates`);
                     iceCandidatesQueue.forEach(candidate => sendIceCandidate(serverPcId, candidate));
                     iceCandidatesQueue.length = 0; // Clear queue
                 }
-                
+
                 await pc.setRemoteDescription(new RTCSessionDescription({
                     type: answer.type,
                     sdp: answer.sdp
                 }));
-                
+
                 console.log('✅ WebRTC offer/answer exchange complete');
-                
+
             } catch (error) {
                 console.error('❌ WebRTC connection error:', error);
                 alert('Lỗi kết nối microphone: ' + error.message);
@@ -838,8 +897,13 @@
                 throw error;
             }
         }
-        
+
         function disconnectWebRTC() {
+            console.log('🔌 Disconnecting WebRTC...');
+
+            // Stop connection monitoring
+            stopConnectionMonitoring();
+
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
                 localStream = null;
@@ -848,11 +912,11 @@
                 pc.close();
                 pc = null;
             }
-            console.log('🔌 WebRTC disconnected');
+            console.log('✅ WebRTC disconnected');
         }
 
         // Disable language selection when recording
-        document.getElementById('language').addEventListener('change', function() {
+        document.getElementById('language').addEventListener('change', function () {
             if (isRecording) {
                 this.disabled = true;
             } else {
@@ -878,5 +942,5 @@
         }
     </script>
 </body>
-</html>
 
+</html>
