@@ -484,6 +484,33 @@
             if (!isRecording) {
                 // Start recording
                 try {
+                    // Cleanup any leftover state from previous session
+                    console.log('🧹 Cleaning up before new recording...');
+                    if (pc) {
+                        pc.close();
+                        pc = null;
+                    }
+                    if (localStream) {
+                        localStream.getTracks().forEach(track => track.stop());
+                        localStream = null;
+                    }
+                    if (ws) {
+                        ws.close();
+                        ws = null;
+                    }
+                    stopConnectionMonitoring();
+
+                    // Reset session boxes
+                    sessionTranscriptBox = null;
+                    sessionTranslationBox = null;
+
+                    console.log('✅ Cleanup complete, waiting for resources to release...');
+
+                    // Wait a bit for resources to be fully released
+                    await new Promise(resolve => setTimeout(resolve, 500));
+
+                    console.log('🚀 Starting new recording...');
+
                     const response = await fetch('/api/start-recording', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -534,15 +561,12 @@
                     btn.classList.add('recording');
                     status.textContent = `🔴 Đang ghi âm - Ngôn ngữ: ${lang === 'ja' ? 'Tiếng Nhật' : 'Tiếng Anh'}`;
                     status.classList.add('recording');
+                    status.style.display = 'block';
 
                     // Clear empty state
                     if (transcriptCount === 0) {
                         transcripts.innerHTML = '';
                     }
-
-                    // Reset session boxes for new recording
-                    sessionTranscriptBox = null;
-                    sessionTranslationBox = null;
 
                     isRecording = true;
                 } catch (error) {
@@ -552,29 +576,47 @@
             } else {
                 // Stop recording
                 try {
+                    // Set flag first to prevent race conditions
+                    isRecording = false;
+
+                    // Stop recording on server
                     await fetch('/api/stop-recording', { method: 'POST' });
 
-                    // Disconnect WebRTC
+                    // Disconnect WebRTC first
                     disconnectWebRTC();
 
+                    // Close WebSocket
                     if (ws) {
                         ws.close();
                         ws = null;
                     }
 
+                    // Reset session boxes
+                    sessionTranscriptBox = null;
+                    sessionTranslationBox = null;
+
+                    // Update UI
                     btn.textContent = '▶️ Bắt đầu ghi âm';
                     btn.classList.remove('recording');
                     status.textContent = '✅ Đã dừng ghi âm';
                     status.classList.remove('recording');
+                    status.style.display = 'block';
 
                     setTimeout(() => {
                         status.style.display = 'none';
                     }, 3000);
 
-                    isRecording = false;
+                    console.log('✅ Recording stopped and cleaned up');
                 } catch (error) {
                     alert('Lỗi khi dừng ghi âm: ' + error.message);
                     console.error(error);
+                    // Force cleanup even on error
+                    isRecording = false;
+                    disconnectWebRTC();
+                    if (ws) {
+                        ws.close();
+                        ws = null;
+                    }
                 }
             }
         }
