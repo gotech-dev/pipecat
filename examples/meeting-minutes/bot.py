@@ -285,9 +285,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Client disconnected")
+        # Stop recording but DON'T cancel task
+        # The task needs to stay alive for the next connection
         if audio_recorder_instance:
             await audio_recorder_instance.stop_recording()
-        await task.cancel()
+        # DO NOT cancel task here - it will prevent next recording from working
+        # await task.cancel()  # ← REMOVED
+        logger.info("✅ Recording stopped, pipeline still running for next connection")
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
