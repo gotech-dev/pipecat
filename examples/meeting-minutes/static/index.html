@@ -641,12 +641,8 @@
                         <div class="transcript-timestamp"></div>
                     `;
 
-                    // Insert at the beginning
-                    if (transcripts.firstChild) {
-                        transcripts.insertBefore(sessionTranscriptBox, transcripts.firstChild);
-                    } else {
-                        transcripts.appendChild(sessionTranscriptBox);
-                    }
+                    // Append to the list
+                    transcripts.appendChild(sessionTranscriptBox);
                 }
 
                 // Append text to the box
@@ -660,6 +656,12 @@
                 }
                 timestampDiv.textContent = formatTimestamp(data.timestamp);
 
+                // If final transcript, reset session boxes so the next sentence creates new ones
+                if (data.is_final) {
+                    sessionTranscriptBox = null;
+                    sessionTranslationBox = null;
+                }
+
             } else if (data.type === 'translation') {
                 // Create session translation box if not exists
                 if (!sessionTranslationBox) {
@@ -671,18 +673,7 @@
                         <div class="transcript-timestamp"></div>
                     `;
 
-                    // Insert after transcript box if exists, otherwise at beginning
-                    if (sessionTranscriptBox && transcripts.contains(sessionTranscriptBox)) {
-                        if (sessionTranscriptBox.nextSibling) {
-                            transcripts.insertBefore(sessionTranslationBox, sessionTranscriptBox.nextSibling);
-                        } else {
-                            transcripts.appendChild(sessionTranslationBox);
-                        }
-                    } else if (transcripts.firstChild) {
-                        transcripts.insertBefore(sessionTranslationBox, transcripts.firstChild);
-                    } else {
-                        transcripts.appendChild(sessionTranslationBox);
-                    }
+                    transcripts.appendChild(sessionTranslationBox);
                 }
 
                 // Append text to the box
@@ -697,8 +688,8 @@
                 timestampDiv.textContent = formatTimestamp(data.timestamp);
             }
 
-            // Scroll to top to see latest content
-            transcripts.scrollTop = 0;
+            // Scroll to bottom to see latest content
+            transcripts.scrollTop = transcripts.scrollHeight;
             transcriptCount++;
         }
 

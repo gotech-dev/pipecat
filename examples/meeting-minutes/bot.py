@@ -220,6 +220,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("GLADIA_API_KEY"),
         region=os.getenv("GLADIA_REGION", "us-west"),
         params=GladiaInputParams(
+            endpointing=0.5,
             language_config=LanguageConfig(
                 languages=[input_language],  # Japanese or English
                 code_switching=False,
@@ -228,7 +229,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 translation=True,  # Enable translation
                 translation_config=TranslationConfig(
                     target_languages=[Language.VI],  # Translate to Vietnamese
-                    model="enhanced",  # Use enhanced translation model
+                    model="base",  # Use base translation model for speed
                 ),
             ),
         ),
