@@ -1,0 +1,5 @@
+[config]
+model = "deepseek/deepseek-chat"
+
+[pr_reviewer]
+extra_instructions = "Vui lòng nhận xét bằng Tiếng Việt."
