@@ -28,7 +28,7 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CONFIG__MODEL: "deepseek/deepseek-chat"
+          CONFIG__MODEL: "deepseek/deepseek-v4-flash"
           PR_REVIEWER__EXTRA_INSTRUCTIONS: "HÃY LUÔN PHẢN HỒI BẰNG TIẾNG VIỆT. Tập trung review logic code."
           PR_DESCRIPTION__EXTRA_INSTRUCTIONS: "HÃY VIẾT MÔ TẢ BẰNG TIẾNG VIỆT."
           PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS: "HÃY GỢI Ý CẢI THIỆN CODE BẰNG TIẾNG VIỆT."
