@@ -1,5 +1,5 @@
 [config]
-model = "deepseek/deepseek-chat"
+model = "xai/grok-4-1-fast-non-reasoning"
 
 [pr_reviewer]
 extra_instructions = "Vui lòng nhận xét bằng Tiếng Việt."
