@@ -22,16 +22,47 @@ jobs:
     name: Run PR Agent
     
     steps:
-      - name: PR Agent action step
-        id: pragent
-        uses: qodo-ai/pr-agent@main
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install httpx==0.27.2 pr-agent
+
+      - name: Run PR Agent
         env:
-          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CONFIG__MODEL: "xai/grok-4-1-fast-non-reasoning"
-          CONFIG__MAX_MODEL_TOKENS: 1000000
-          CONFIG__CUSTOM_MODEL_MAX_TOKENS: 2000000
+          GITHUB__USER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: "sk-master-jgmvfCnTlbSzVxG8nS3blOiM4afV3Jd5"
+          OPENAI__KEY: "sk-master-jgmvfCnTlbSzVxG8nS3blOiM4afV3Jd5"
+          OPENAI__API_BASE: "https://code.gotechjsc.com/v1"
+          OPENAI_API_BASE: "https://code.gotechjsc.com/v1"
+          CONFIG__MODEL: "openai/digix-coder"
+          CONFIG__MAX_MODEL_TOKENS: 32000
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: 32000
           CONFIG__VERBOSITY_LEVEL: 2
           PR_REVIEWER__EXTRA_INSTRUCTIONS: "HÃY LUÔN PHẢN HỒI BẰNG TIẾNG VIỆT. Tập trung review logic code."
           PR_DESCRIPTION__EXTRA_INSTRUCTIONS: "HÃY VIẾT MÔ TẢ BẰNG TIẾNG VIỆT."
           PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS: "HÃY GỢI Ý CẢI THIỆN CODE BẰNG TIẾNG VIỆT."
+        run: |
+          # Retrieve the PR URL
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          if [ -z "$PR_URL" ]; then
+            PR_URL="${{ github.event.issue.pull_request.html_url }}"
+          fi
+
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            # Parse command from comment (e.g. /review)
+            CMD=$(echo "${{ github.event.comment.body }}" | awk '{print $1}' | sed 's/^\///')
+            python -m pr_agent.cli --pr_url "$PR_URL" $CMD
+          else
+            # Default to review for pull_request events
+            python -m pr_agent.cli --pr_url "$PR_URL" review
+          fi
