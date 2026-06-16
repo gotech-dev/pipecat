@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Biên bản cuộc họp (tiếng Việt)</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 24px;
+        }
+        .wrap { max-width: 920px; margin: 0 auto; }
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        h1 { font-size: 22px; font-weight: 700; }
+        h1 small { display: block; font-size: 12px; color: #94a3b8; font-weight: 400; margin-top: 4px; }
+        .btn {
+            border: none; border-radius: 10px; padding: 10px 18px; font-size: 14px;
+            cursor: pointer; font-weight: 600; transition: .15s;
+        }
+        .btn-ghost { background: #1e293b; color: #cbd5e1; }
+        .btn-rec { background: #16a34a; color: #fff; font-size: 16px; padding: 14px 28px; }
+        .btn-rec.recording { background: #dc2626; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+        #status { font-size: 14px; color: #94a3b8; min-height: 20px; }
+        #status.recording { color: #f87171; font-weight: 600; }
+        .panel { background: #1e293b; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
+        .panel h2 { font-size: 14px; color: #94a3b8; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .5px; }
+        #transcripts { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+        .empty-state { color: #64748b; text-align: center; padding: 28px; }
+        .line { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border-radius: 8px; background: #0f172a; }
+        .who { font-weight: 700; flex-shrink: 0; min-width: 84px; }
+        .line .txt { flex: 1; line-height: 1.5; }
+        .line .ts { font-size: 11px; color: #64748b; flex-shrink: 0; }
+        #live { color: #94a3b8; font-style: italic; padding: 8px 10px; min-height: 20px; }
+        #summary { white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+        #summary.empty { color: #64748b; font-style: italic; }
+        .spin { color: #fbbf24; }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <header>
+            <h1>📋 Biên bản cuộc họp
+                <small>Tiếng Việt · tự động tách người nói (Speechmatics) · tóm tắt AI</small>
+            </h1>
+            <div style="display:flex;gap:8px;">
+                <a href="/minutes/history" style="text-decoration:none;"><button class="btn btn-ghost">📚 Lịch sử</button></a>
+                <a href="/meeting" style="text-decoration:none;"><button class="btn btn-ghost">🎙️ Màn dịch</button></a>
+                <button class="btn btn-ghost" onclick="handleLogout()">Đăng xuất</button>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button id="recordBtn" class="btn btn-rec" onclick="toggleRecording()">▶️ Bắt đầu ghi âm</button>
+            <div id="status">Sẵn sàng ghi âm.</div>
+        </div>
+
+        <div class="panel">
+            <h2>Nội dung theo người nói</h2>
+            <div id="transcripts">
+                <div class="empty-state">Chưa có nội dung. Nhấn "Bắt đầu ghi âm" để bắt đầu.</div>
+            </div>
+            <div id="live"></div>
+        </div>
+
+        <div class="panel">
+            <h2>Biên bản AI tóm tắt
+                <button id="summaryBtn" class="btn btn-primary" style="float:right;font-size:12px;padding:6px 12px;" onclick="fetchSummary()" disabled>Tải biên bản</button>
+            </h2>
+            <div id="summary" class="empty">Biên bản sẽ được tạo tự động sau khi bạn dừng ghi âm.</div>
+        </div>
+    </div>
+
+    <script>
+        let pc = null, ws = null, localStream = null;
+        let isRecording = false;
+        let transcriptCount = 0;
+        let currentSessionId = null;
+
+        // Bảng màu cho từng người nói
+        const SPEAKER_COLORS = ['#60a5fa', '#34d399', '#f472b6', '#fbbf24', '#a78bfa', '#fb923c', '#22d3ee', '#f87171'];
+        const speakerColorMap = {};
+
+        function speakerDisplay(s) {
+            if (s && /^S\d+$/i.test(s)) return 'Người ' + s.slice(1);
+            return s || 'Không rõ';
+        }
+        function speakerColor(s) {
+            if (!(s in speakerColorMap)) {
+                speakerColorMap[s] = SPEAKER_COLORS[Object.keys(speakerColorMap).length % SPEAKER_COLORS.length];
+            }
+            return speakerColorMap[s];
+        }
+        function formatTimestamp(ts) {
+            if (!ts) return '';
+            try { return new Date(ts).toLocaleTimeString('vi-VN'); } catch { return ''; }
+        }
+
+        function addTranscript(data) {
+            const transcripts = document.getElementById('transcripts');
+            const live = document.getElementById('live');
+
+            if (data.is_final) {
+                if (transcriptCount === 0) transcripts.innerHTML = '';
+                live.textContent = '';
+
+                const line = document.createElement('div');
+                line.className = 'line';
+                const who = speakerDisplay(data.speaker);
+                line.innerHTML = `
+                    <span class="who" style="color:${speakerColor(data.speaker)}">${escapeHtml(who)}</span>
+                    <span class="txt">${escapeHtml(data.text)}</span>
+                    <span class="ts">${formatTimestamp(data.timestamp)}</span>
+                `;
+                transcripts.appendChild(line);
+                transcripts.scrollTop = transcripts.scrollHeight;
+                transcriptCount++;
+            } else {
+                // interim: hiện tạm ở dòng live
+                const who = speakerDisplay(data.speaker);
+                live.innerHTML = `<span style="color:${speakerColor(data.speaker)}">${escapeHtml(who)}:</span> ${escapeHtml(data.text)}`;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text == null ? '' : text;
+            return div.innerHTML;
+        }
+
+        async function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+            const status = document.getElementById('status');
+
+            if (!isRecording) {
+                try {
+                    // dọn state cũ
+                    if (pc) { pc.close(); pc = null; }
+                    if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+                    if (ws) { ws.close(); ws = null; }
+                    await new Promise(r => setTimeout(r, 400));
+
+                    const resp = await fetch('/api/minutes/start-recording', { method: 'POST' });
+                    if (!resp.ok) throw new Error('Không thể bắt đầu ghi âm');
+                    const data = await resp.json();
+                    currentSessionId = data.session_id;
+
+                    // reset UI nội dung
+                    document.getElementById('transcripts').innerHTML = '<div class="empty-state">Đang nghe...</div>';
+                    document.getElementById('live').textContent = '';
+                    document.getElementById('summary').textContent = 'Biên bản sẽ được tạo sau khi dừng ghi âm.';
+                    document.getElementById('summary').className = 'empty';
+                    document.getElementById('summaryBtn').disabled = true;
+                    transcriptCount = 0;
+
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    ws = new WebSocket(`${protocol}//${window.location.host}/ws/minutes-transcripts`);
+                    ws.onopen = async () => {
+                        try { await connectWebRTC(); }
+                        catch (e) {
+                            alert('Không thể kết nối microphone: ' + e.message);
+                            btn.textContent = '▶️ Bắt đầu ghi âm'; btn.classList.remove('recording'); isRecording = false;
+                        }
+                    };
+                    ws.onmessage = (ev) => addTranscript(JSON.parse(ev.data));
+                    ws.onerror = () => console.error('WebSocket error');
+
+                    btn.textContent = '⏹️ Dừng ghi âm';
+                    btn.classList.add('recording');
+                    status.textContent = '🔴 Đang ghi âm...';
+                    status.classList.add('recording');
+                    isRecording = true;
+                } catch (e) {
+                    alert('Lỗi khi bắt đầu: ' + e.message);
+                }
+            } else {
+                try {
+                    isRecording = false;
+                    await fetch('/api/minutes/stop-recording', { method: 'POST' });
+                    disconnectWebRTC();
+                    if (ws) { ws.close(); ws = null; }
+
+                    btn.textContent = '▶️ Bắt đầu ghi âm';
+                    btn.classList.remove('recording');
+                    status.classList.remove('recording');
+                    status.textContent = '✅ Đã dừng. Đang tạo biên bản AI...';
+                    document.getElementById('summary').innerHTML = '<span class="spin">⏳ Đang tạo biên bản, vui lòng đợi...</span>';
+                    document.getElementById('summary').className = '';
+
+                    pollSummary(currentSessionId);
+                } catch (e) {
+                    alert('Lỗi khi dừng: ' + e.message);
+                    isRecording = false; disconnectWebRTC();
+                    if (ws) { ws.close(); ws = null; }
+                }
+            }
+        }
+
+        // ----- Biên bản AI -----
+        async function fetchSummary() {
+            if (!currentSessionId) return;
+            const el = document.getElementById('summary');
+            const resp = await fetch(`/api/minutes/summary/${currentSessionId}`);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.summary) {
+                    el.textContent = data.summary; el.className = '';
+                } else {
+                    el.innerHTML = '<span class="spin">⏳ Biên bản chưa sẵn sàng, thử lại sau giây lát...</span>';
+                }
+            }
+        }
+
+        function pollSummary(sessionId, attempt = 0) {
+            if (!sessionId || attempt > 30) {
+                document.getElementById('status').textContent = '✅ Đã dừng ghi âm.';
+                if (attempt > 30) document.getElementById('summaryBtn').disabled = false;
+                return;
+            }
+            fetch(`/api/minutes/summary/${sessionId}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.summary) {
+                        const el = document.getElementById('summary');
+                        el.textContent = data.summary; el.className = '';
+                        document.getElementById('status').textContent = '✅ Đã tạo biên bản.';
+                        document.getElementById('summaryBtn').disabled = false;
+                    } else {
+                        setTimeout(() => pollSummary(sessionId, attempt + 1), 2000);
+                    }
+                })
+                .catch(() => setTimeout(() => pollSummary(sessionId, attempt + 1), 2000));
+        }
+
+        // ----- WebRTC (handshake giống màn hình /meeting, đổi endpoint /api/minutes/offer) -----
+        async function connectWebRTC() {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+            const TURN_SERVER_IP = '116.118.2.69';
+            const TURN_USERNAME = 'turnuser';
+            const TURN_PASSWORD = 'turnpassword123';
+
+            pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: `turn:${TURN_SERVER_IP}:3478`, username: TURN_USERNAME, credential: TURN_PASSWORD },
+                    { urls: `turn:${TURN_SERVER_IP}:3478?transport=tcp`, username: TURN_USERNAME, credential: TURN_PASSWORD },
+                    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+                    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
+                ],
+                iceCandidatePoolSize: 10
+            });
+
+            localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+            let serverPcId = null;
+            const iceQueue = [];
+            pc.onicecandidate = (event) => {
+                if (!event.candidate) return;
+                const c = {
+                    candidate: event.candidate.candidate,
+                    sdp_mline_index: event.candidate.sdpMLineIndex ?? 0,
+                    sdp_mid: event.candidate.sdpMid || ''
+                };
+                if (serverPcId) sendIce(serverPcId, c); else iceQueue.push(c);
+            };
+            function sendIce(pcId, c) {
+                fetch('/api/minutes/offer', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pc_id: pcId, candidates: [c] })
+                }).catch(err => console.error('ICE error:', err));
+            }
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            const resp = await fetch('/api/minutes/offer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sdp: offer.sdp, type: offer.type, pc_id: 'minutes-pc' })
+            });
+            if (!resp.ok) throw new Error(`Kết nối WebRTC thất bại: ${resp.status}`);
+
+            const answer = await resp.json();
+            serverPcId = answer.pc_id;
+            if (iceQueue.length) { iceQueue.forEach(c => sendIce(serverPcId, c)); iceQueue.length = 0; }
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: answer.type, sdp: answer.sdp }));
+        }
+
+        function disconnectWebRTC() {
+            if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+            if (pc) { pc.close(); pc = null; }
+        }
+
+        async function handleLogout() {
+            try { await fetch('/api/logout', { method: 'POST', credentials: 'include' }); } catch {}
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>

@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Meeting Minutes Bot - Ghi âm và dịch realtime cuộc họp"
 requires-python = ">=3.10"
 dependencies = [
-    "pipecat-ai[webrtc,gladia,silero,local-smart-turn-v3,runner]",
+    "pipecat-ai[webrtc,gladia,speechmatics,silero,local-smart-turn-v3,runner]",
+    "google-genai>=1.0",
     "python-dotenv>=1.0.0",
 ]
 

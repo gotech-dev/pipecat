@@ -621,6 +621,11 @@ def setup_custom_routes(app: FastAPI):
     from history_routes import setup_history_routes
     setup_history_routes(app)
 
+    # Setup Meeting Minutes (/minutes) routes - màn hình MỚI, độc lập với /meeting.
+    # Dùng chung small_webrtc_handler nhưng pipeline riêng (Speechmatics diarization).
+    from minutes_routes import setup_minutes_routes
+    setup_minutes_routes(app, small_webrtc_handler)
+
 
 if __name__ == "__main__":
     from pipecat.runner.run import main
