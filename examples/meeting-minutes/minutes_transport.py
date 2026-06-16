@@ -29,7 +29,9 @@ minutes_transport_params = {
     ),
 }
 
-# Thêm Daily nếu khả dụng (giống bot.py)
+# Thêm Daily nếu khả dụng (giống bot.py).
+# Phải bắt cả Exception: module daily transport của pipecat tự raise Exception
+# (không phải ImportError) khi gói `daily` chưa được cài.
 try:
     from pipecat.transports.daily.transport import DailyParams
 
@@ -38,5 +40,5 @@ try:
         audio_out_enabled=False,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
     )
-except ImportError:
+except (ImportError, Exception):
     pass
