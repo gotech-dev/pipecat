@@ -21,7 +21,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from loguru import logger
 
 import minutes_bot
@@ -52,6 +52,25 @@ def run_summary_for_session(session_id: str):
 def _new_session_id() -> str:
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"minutes_vi_{ts}"
+
+
+def _format_session_datetime(session_id: str) -> str:
+    """minutes_vi_YYYYMMDD_HHMMSS -> 'DD/MM/YYYY HH:MM:SS' (rỗng nếu không parse được)."""
+    parts = session_id.split("_")  # ['minutes', 'vi', 'YYYYMMDD', 'HHMMSS']
+    d = parts[2] if len(parts) > 2 else ""
+    t = parts[3] if len(parts) > 3 else ""
+    date_str = f"{d[6:8]}/{d[4:6]}/{d[0:4]}" if len(d) == 8 else d
+    time_str = f"{t[0:2]}:{t[2:4]}:{t[4:6]}" if len(t) == 6 else t
+    return f"{date_str} {time_str}".strip()
+
+
+def build_minutes_markdown(session_id: str, summary: str) -> str:
+    """Bọc summary (đã là Markdown) thành file biên bản có tiêu đề + ngày giờ."""
+    when = _format_session_datetime(session_id)
+    header = "# Biên bản cuộc họp\n"
+    if when:
+        header += f"\n*{when}*\n"
+    return f"{header}\n---\n\n{summary.strip()}\n"
 
 
 def setup_minutes_routes(app, small_webrtc_handler=None):
@@ -138,6 +157,20 @@ def setup_minutes_routes(app, small_webrtc_handler=None):
             "session_id": session_id,
             "summary": minutes_history_service.get_summary(session_id),
         }
+
+    @app.get("/api/minutes/summary/{session_id}/download")
+    async def minutes_download_summary(request: Request, session_id: str):
+        _check_auth(request)
+        summary = minutes_history_service.get_summary(session_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="Chưa có biên bản cho phiên này")
+        content = build_minutes_markdown(session_id, summary)
+        filename = f"bien-ban-{session_id}.md"
+        return Response(
+            content=content,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.get("/api/minutes/history")
     async def minutes_history(request: Request):

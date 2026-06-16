@@ -71,7 +71,7 @@
 
         <div class="panel">
             <h2>Biên bản AI tóm tắt
-                <button id="summaryBtn" class="btn btn-primary" style="float:right;font-size:12px;padding:6px 12px;" onclick="fetchSummary()" disabled>Tải biên bản</button>
+                <button id="summaryBtn" class="btn btn-primary" style="float:right;font-size:12px;padding:6px 12px;" onclick="downloadSummary()" disabled>⬇️ Tải .md</button>
             </h2>
             <div id="summary" class="empty">Biên bản sẽ được tạo tự động sau khi bạn dừng ghi âm.</div>
         </div>
@@ -203,6 +203,12 @@
         }
 
         // ----- Biên bản AI -----
+        function downloadSummary() {
+            if (!currentSessionId) return;
+            // Điều hướng tới endpoint trả file .md (gửi kèm cookie phiên đăng nhập)
+            window.location.href = `/api/minutes/summary/${currentSessionId}/download`;
+        }
+
         async function fetchSummary() {
             if (!currentSessionId) return;
             const el = document.getElementById('summary');

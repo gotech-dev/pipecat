@@ -142,7 +142,10 @@
                 }
 
                 // Biên bản AI
-                html += `<div class="section"><h3>📝 Biên bản AI tóm tắt</h3>`;
+                const dlBtn = data.summary
+                    ? `<button onclick="downloadSummary('${recordingId}')" style="float:right;background:#4338ca;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">⬇️ Tải .md</button>`
+                    : '';
+                html += `<div class="section"><h3>📝 Biên bản AI tóm tắt ${dlBtn}</h3>`;
                 if (data.summary) {
                     html += `<div class="summary-box">${escapeHtml(data.summary)}</div>`;
                 } else {
@@ -171,6 +174,10 @@
             } catch (e) {
                 content.innerHTML = `<div class="empty-state"><div class="empty-state-icon">❌</div><div class="empty-state-text">Lỗi: ${e.message}</div></div>`;
             }
+        }
+
+        function downloadSummary(recordingId) {
+            window.location.href = `/api/minutes/summary/${recordingId}/download`;
         }
 
         function closeDetail() { document.getElementById('detailModal').style.display = 'none'; }
