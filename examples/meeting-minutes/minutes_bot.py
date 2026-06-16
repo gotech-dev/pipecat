@@ -12,6 +12,7 @@ File được xây dựng theo từng phase:
 - Phase 5: generate_minutes_summary() (biên bản AI).
 """
 
+import asyncio
 import datetime
 import os
 
@@ -33,7 +34,14 @@ def _load_minutes_keys_from_root_env():
         from dotenv import dotenv_values
 
         vals = dotenv_values(root_env)
-        for k in ("SPEECHMATICS_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        for k in (
+            "SPEECHMATICS_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            # Gladia: dùng làm STT dự phòng cho /minutes khi Speechmatics lỗi
+            "GLADIA_API_KEY",
+            "GLADIA_REGION",
+        ):
             if not os.getenv(k) and vals.get(k):
                 os.environ[k] = vals[k]
     except Exception as e:  # pragma: no cover
@@ -51,6 +59,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.gladia.config import GladiaInputParams, LanguageConfig
+from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.services.speechmatics.stt import OperatingPoint, SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 
@@ -226,6 +236,93 @@ def build_speechmatics_stt(api_key: str = None) -> SpeechmaticsSTTService:
     )
 
 
+# ---------------------------------------------------------------------------
+# Fallback STT (Gladia) — khi Speechmatics lỗi thì vẫn ra text toàn bộ cuộc họp
+# (không tách người nói). Pre-flight: lỗi key Speechmatics luôn xảy ra ngay lúc
+# _connect() đầu phiên, nên ta kiểm tra key TRƯỚC khi dựng pipeline rồi chọn STT.
+#
+# QUAN TRỌNG: KHÔNG validate bằng cách mở một RT session thật — gói Speechmatics
+# giới hạn concurrent session, mở session probe sẽ chiếm mất slot mà phiên ghi
+# thật cần (lỗi "Concurrent Quota Exceeded"). Thay vào đó gọi management API cấp
+# temp-key: chỉ kiểm tra key hợp lệ (HTTP 201) hay sai (401/403), KHÔNG tốn quota.
+# ---------------------------------------------------------------------------
+SPEECHMATICS_PREFLIGHT_TIMEOUT = 8.0
+SPEECHMATICS_MP_URL = "https://mp.speechmatics.com/v1/api_keys?type=rt"
+
+
+def _check_speechmatics_key(api_key: str) -> bool:
+    """Gọi management API (đồng bộ) để xác thực key. Không tốn RT concurrent quota.
+
+    Trả True nếu key hợp lệ (HTTP 2xx). False nếu auth lỗi (401/403). Với lỗi mơ hồ
+    (mạng/5xx/timeout) trả True (fail-open) để không tự ý bỏ diarization khi key
+    nhiều khả năng vẫn tốt — pipeline thật vẫn xử lý lỗi kết nối an toàn nếu sai.
+    """
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        SPEECHMATICS_MP_URL,
+        data=b'{"ttl": 60}',
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=SPEECHMATICS_PREFLIGHT_TIMEOUT):
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            logger.warning(f"⚠️ [minutes] Key Speechmatics bị từ chối (HTTP {e.code})")
+            return False
+        logger.warning(f"⚠️ [minutes] Management API trả HTTP {e.code}, tạm tin key vẫn tốt")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ [minutes] Không validate được key Speechmatics ({e}), tạm tin key vẫn tốt")
+        return True
+
+
+async def speechmatics_available() -> bool:
+    """Kiểm tra Speechmatics có dùng được không (key có + hợp lệ), không tốn quota.
+
+    False nếu thiếu key hoặc key bị từ chối (401/403) -> fallback Gladia.
+    """
+    api_key = os.getenv("SPEECHMATICS_API_KEY")
+    if not api_key:
+        logger.warning("⚠️ [minutes] Thiếu SPEECHMATICS_API_KEY -> fallback Gladia")
+        return False
+
+    ok = await asyncio.to_thread(_check_speechmatics_key, api_key)
+    if ok:
+        logger.info("✅ [minutes] Speechmatics khả dụng (dùng diarization)")
+    return ok
+
+
+def build_gladia_fallback_stt() -> GladiaSTTService:
+    """STT dự phòng (Gladia) cho /minutes: tiếng Việt, KHÔNG dịch, KHÔNG tách người.
+
+    Cấu hình giống màn /meeting nhưng bỏ translation và đặt ngôn ngữ tiếng Việt.
+    Transcript ra liền mạch, gom hết về một người nói.
+    """
+    return GladiaSTTService(
+        api_key=os.getenv("GLADIA_API_KEY"),
+        region=os.getenv("GLADIA_REGION", "us-west"),
+        params=GladiaInputParams(
+            endpointing=0.5,
+            language_config=LanguageConfig(
+                languages=[MINUTES_LANGUAGE],
+                code_switching=False,
+            ),
+        ),
+    )
+
+
+async def build_minutes_stt():
+    """Chọn STT cho /minutes: ưu tiên Speechmatics, lỗi thì fallback sang Gladia."""
+    if await speechmatics_available():
+        return build_speechmatics_stt()
+    logger.warning("🔁 [minutes] Dùng Gladia thay Speechmatics (text liền, không tách người)")
+    return build_gladia_fallback_stt()
+
+
 def build_minutes_pipeline(transport, stt, recorder, broadcaster=None) -> Pipeline:
     """Dựng pipeline /minutes: input -> STT(diarization) -> broadcaster -> recorder."""
     broadcaster = broadcaster or minutes_transcript_broadcaster
@@ -250,7 +347,7 @@ async def run_minutes_bot(transport, runner_args):
 
     logger.info("Starting Meeting Minutes (diarization) Bot")
 
-    stt = build_speechmatics_stt()
+    stt = await build_minutes_stt()
     recorder = StreamingAudioRecorder(output_dir="recordings")
     minutes_audio_recorder_instance = recorder
 
