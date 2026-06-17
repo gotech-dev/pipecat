@@ -1,0 +1,6 @@
+# Dữ liệu ghi âm / transcript cuộc họp (runtime artifacts — KHÔNG đưa lên repo)
+recordings/
+
+# Local env & cache
+.env
+__pycache__/
