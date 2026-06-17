@@ -11,6 +11,7 @@ small_webrtc_handler với màn hình cũ nhưng có offer endpoint riêng để
 pipeline Speechmatics (run_minutes_bot) thay vì pipeline Gladia.
 """
 
+import asyncio
 import datetime
 import os
 
@@ -37,6 +38,28 @@ def _check_auth(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+# Khoảng "grace" giữ session mở thêm sau khi bấm Stop, để các câu final MUỘN của
+# Speechmatics (ENHANCED + diarization trả final trễ vài giây) kịp lưu vào history
+# trước khi đóng session + tóm tắt. Nếu đóng ngay -> đuôi cuộc họp bị rớt khỏi
+# transcript -> biên bản thiếu ý. Chỉnh qua env MINUTES_STOP_GRACE_SECS.
+DEFAULT_STOP_GRACE_SECS = 4.0
+
+
+def _stop_grace_secs() -> float:
+    """Đọc MINUTES_STOP_GRACE_SECS (giây). Trả mặc định nếu trống/không hợp lệ/âm."""
+    raw = os.getenv("MINUTES_STOP_GRACE_SECS", "").strip()
+    if not raw:
+        return DEFAULT_STOP_GRACE_SECS
+    try:
+        val = float(raw)
+    except ValueError:
+        logger.warning(
+            f"MINUTES_STOP_GRACE_SECS={raw!r} không phải số, dùng {DEFAULT_STOP_GRACE_SECS}"
+        )
+        return DEFAULT_STOP_GRACE_SECS
+    return val if val >= 0 else DEFAULT_STOP_GRACE_SECS
+
+
 def run_summary_for_session(session_id: str):
     """Sinh biên bản AI cho session (chạy nền). Lỗi không làm hỏng luồng dừng ghi."""
     try:
@@ -47,6 +70,29 @@ def run_summary_for_session(session_id: str):
             logger.warning(f"⚠️ [minutes] Không sinh được biên bản cho {session_id}")
     except Exception as e:  # pragma: no cover
         logger.error(f"❌ [minutes] Lỗi sinh biên bản: {e}", exc_info=True)
+
+
+async def finalize_and_summarize(session_id: str):
+    """Đóng-trễ session rồi sinh biên bản (chạy nền sau khi đã trả response Stop).
+
+    1) Chờ ``grace`` giây để các câu final muộn của STT kịp ``save_transcript`` vào
+       session (broadcaster vẫn đang chạy vì pipeline không bị cancel khi Stop).
+    2) Đóng đúng session này (guard ``expected_session_id``) -> ghi JSON đầy đủ.
+    3) Gọi LLM (blocking I/O) trong thread riêng để không chẹn event loop.
+    """
+    grace = _stop_grace_secs()
+    if grace > 0:
+        try:
+            await asyncio.sleep(grace)
+        except asyncio.CancelledError:  # pragma: no cover - shutdown
+            logger.warning(f"[minutes] Grace wait bị huỷ cho {session_id}")
+
+    json_path = minutes_history_service.end_session(expected_session_id=session_id)
+    if json_path is None:
+        # Session đã bị thay thế bởi phiên mới (hiếm) -> vẫn thử tóm tắt nếu JSON cũ tồn tại
+        logger.info(f"[minutes] Đóng-trễ {session_id} không tạo JSON mới, thử tóm tắt JSON sẵn có")
+
+    await asyncio.to_thread(run_summary_for_session, session_id)
 
 
 def _new_session_id() -> str:
@@ -130,15 +176,19 @@ def setup_minutes_routes(app, small_webrtc_handler=None):
             await minutes_bot.minutes_audio_recorder_instance.stop_recording()
 
         session_id = minutes_bot.minutes_recording_state.get("session_id")
-        minutes_history_service.end_session()
         minutes_bot.minutes_recording_state["current_filename"] = None
         minutes_bot.minutes_recording_state["session_id"] = None
 
-        # Sinh biên bản AI ở nền (Starlette chạy hàm sync trong threadpool -> không block)
+        # KHÔNG đóng session ngay: giữ mở thêm 'grace window' để các câu final muộn
+        # của Speechmatics kịp lưu, rồi mới đóng + sinh biên bản (tránh thiếu ý ở
+        # đoạn cuối). Toàn bộ chạy nền sau khi response đã trả về.
         if session_id:
-            background_tasks.add_task(run_summary_for_session, session_id)
+            background_tasks.add_task(finalize_and_summarize, session_id)
+        else:
+            # Không có session_id (bất thường) -> vẫn đóng để không rò rỉ session
+            minutes_history_service.end_session()
 
-        logger.info(f"🛑 [minutes] Dừng ghi: {session_id}")
+        logger.info(f"🛑 [minutes] Dừng ghi: {session_id} (đóng-trễ {_stop_grace_secs()}s)")
         return {"status": "stopped", "session_id": session_id}
 
     @app.get("/api/minutes/status")

@@ -7,6 +7,7 @@ import pytest
 from minutes_history_service import MinutesHistoryService
 import minutes_summary
 from minutes_summary import (
+    build_generation_config,
     build_summary_prompt,
     format_transcript_for_prompt,
     generate_minutes_summary,
@@ -71,6 +72,51 @@ def test_build_summary_prompt_has_sections_and_text():
     assert "Quyết định đã thống nhất" in prompt
     assert "Việc cần làm" in prompt
     assert "nội dung abc" in prompt
+
+
+def test_build_summary_prompt_emphasizes_completeness():
+    """Prompt phải ép ĐẦY ĐỦ (không bỏ sót ý) -> chống biên bản thiếu ý."""
+    prompt = build_summary_prompt("Người 1: abc")
+    assert "ĐẦY ĐỦ" in prompt
+    assert "KHÔNG bỏ sót" in prompt
+    # Phải nhắc model đọc cả đoạn cuối (nơi hay bị mất do STT trả final trễ)
+    assert "ĐOẠN CUỐI" in prompt
+
+
+# --------------------------- generation config ---------------------------
+def test_build_generation_config_defaults(monkeypatch):
+    monkeypatch.delenv("MINUTES_SUMMARY_TEMPERATURE", raising=False)
+    monkeypatch.delenv("MINUTES_SUMMARY_MAX_TOKENS", raising=False)
+    cfg = build_generation_config()
+    assert cfg["temperature"] == minutes_summary.DEFAULT_TEMPERATURE
+    assert cfg["max_output_tokens"] == minutes_summary.DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def test_build_generation_config_env_override(monkeypatch):
+    monkeypatch.setenv("MINUTES_SUMMARY_TEMPERATURE", "0.5")
+    monkeypatch.setenv("MINUTES_SUMMARY_MAX_TOKENS", "1234")
+    cfg = build_generation_config()
+    assert cfg["temperature"] == 0.5
+    assert cfg["max_output_tokens"] == 1234
+
+
+def test_build_generation_config_bad_env_falls_back(monkeypatch):
+    monkeypatch.setenv("MINUTES_SUMMARY_TEMPERATURE", "xx")
+    monkeypatch.setenv("MINUTES_SUMMARY_MAX_TOKENS", "yy")
+    cfg = build_generation_config()
+    assert cfg["temperature"] == minutes_summary.DEFAULT_TEMPERATURE
+    assert cfg["max_output_tokens"] == minutes_summary.DEFAULT_MAX_OUTPUT_TOKENS
+
+
+def test_generate_summary_text_passes_config(monkeypatch):
+    """generate_summary_text phải truyền config (temperature/max_tokens) vào API."""
+    monkeypatch.delenv("MINUTES_SUMMARY_TEMPERATURE", raising=False)
+    monkeypatch.delenv("MINUTES_SUMMARY_MAX_TOKENS", raising=False)
+    transcripts = [{"speaker": "S1", "text": "Chào"}]
+    client = FakeClient(text="ok")
+    generate_summary_text(transcripts, client=client, model="m")
+    assert "config" in client.record
+    assert client.record["config"]["temperature"] == minutes_summary.DEFAULT_TEMPERATURE
 
 
 def test_extract_text_uses_text_attr():

@@ -47,6 +47,35 @@ def test_save_without_session_is_noop(svc):
     assert svc.end_session() is None
 
 
+def test_end_session_expected_mismatch_keeps_session_open(svc, tmp_path):
+    """Guard đóng-trễ: end_session(expected != current) KHÔNG đóng, session vẫn mở.
+
+    Mô phỏng: phiên A đang chờ grace thì người dùng đã mở phiên B (current = B).
+    Tác vụ đóng-trễ của A gọi end_session(expected_session_id=A) -> phải bỏ qua,
+    không đè/đóng nhầm phiên B.
+    """
+    svc.start_session("minutes_vi_B")
+    svc.save_transcript(_msg("S1", "thuộc phiên B"))
+
+    # Đóng-trễ của phiên A cũ tới muộn -> không được đóng phiên B
+    assert svc.end_session(expected_session_id="minutes_vi_A") is None
+    assert svc._current_session_id == "minutes_vi_B"  # vẫn mở
+
+    # Đóng đúng phiên hiện tại thì thành công
+    path = svc.end_session(expected_session_id="minutes_vi_B")
+    assert path and os.path.exists(path)
+    data = json.loads(open(path, encoding="utf-8").read())
+    assert data["transcripts"][0]["text"] == "thuộc phiên B"
+
+
+def test_end_session_no_expected_closes_current(svc):
+    """Không truyền expected -> giữ hành vi cũ: đóng session hiện tại."""
+    svc.start_session("minutes_vi_C")
+    svc.save_transcript(_msg("S1", "x"))
+    assert svc.end_session() is not None
+    assert svc._current_session_id is None
+
+
 def test_load_transcripts_only_final(svc):
     svc.start_session("minutes_vi_20260616_102000")
     svc.save_transcript(_msg("S1", "final 1", is_final=True))

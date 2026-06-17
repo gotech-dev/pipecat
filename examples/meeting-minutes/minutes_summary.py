@@ -45,21 +45,63 @@ def format_transcript_for_prompt(
 
 
 def build_summary_prompt(transcript_text: str) -> str:
-    """Dựng prompt tiếng Việt yêu cầu LLM viết biên bản cuộc họp."""
+    """Dựng prompt tiếng Việt yêu cầu LLM viết biên bản cuộc họp.
+
+    Prompt ưu tiên ĐẦY ĐỦ hơn ngắn gọn: bản ghi từ STT thường rời rạc, nếu yêu cầu
+    "ngắn gọn" thì LLM hay bỏ sót ý phụ -> biên bản thiếu ý. Vì vậy ép liệt kê HẾT
+    các chủ đề được nhắc tới, mỗi điểm một gạch đầu dòng.
+    """
     return (
         "Bạn là thư ký cuộc họp chuyên nghiệp. Dưới đây là bản ghi lời nói của "
-        "cuộc họp, mỗi dòng là một người nói (đã được tách theo giọng nói).\n\n"
+        "cuộc họp, mỗi dòng là một người nói (đã được tách theo giọng nói). Bản ghi "
+        "có thể rời rạc, lặp hoặc thiếu dấu câu do nhận dạng giọng nói tự động.\n\n"
         "Hãy viết BIÊN BẢN CUỘC HỌP bằng tiếng Việt, trình bày Markdown gồm các mục:\n"
         "## Tóm tắt nội dung\n"
         "## Các điểm thảo luận chính\n"
         "## Quyết định đã thống nhất\n"
         "## Việc cần làm (ai - làm gì - hạn nếu có)\n\n"
-        "Yêu cầu: ngắn gọn, đúng trọng tâm, chỉ dựa trên nội dung bản ghi, "
-        "không bịa thông tin. Nếu một mục không có dữ liệu thì ghi 'Không có'.\n\n"
+        "Yêu cầu QUAN TRỌNG:\n"
+        "- ĐẦY ĐỦ là ưu tiên số 1: liệt kê HẾT mọi chủ đề/ý được nhắc tới trong bản "
+        "ghi, KHÔNG bỏ sót, kể cả ý phụ hay nhắc thoáng qua. Thà dài còn hơn thiếu ý.\n"
+        "- Mục 'Các điểm thảo luận chính' trình bày dạng gạch đầu dòng, mỗi chủ đề "
+        "một dòng; đọc lướt toàn bộ bản ghi (kể cả đoạn đầu và ĐOẠN CUỐI) trước khi viết.\n"
+        "- Chỉ dựa trên nội dung bản ghi, KHÔNG bịa thông tin, không suy diễn quá xa.\n"
+        "- Nếu một mục không có dữ liệu thì ghi 'Không có'.\n\n"
         "----- BẢN GHI -----\n"
         f"{transcript_text}\n"
         "----- HẾT BẢN GHI -----"
     )
+
+
+# Cấu hình sinh nội dung: temperature thấp để biên bản ỔN ĐỊNH (bớt "đôi khi thiếu
+# ý" do ngẫu nhiên), max_output_tokens đủ lớn để không cụt biên bản họp dài.
+DEFAULT_TEMPERATURE = 0.2
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
+
+def build_generation_config() -> dict:
+    """Trả về dict config cho generate_content (genai coerce dict -> GenerateContentConfig).
+
+    Dùng dict để KHÔNG phải import google.genai ở cấp module (giữ test import nhẹ).
+    Chỉnh qua env MINUTES_SUMMARY_TEMPERATURE / MINUTES_SUMMARY_MAX_TOKENS.
+    """
+    temperature = DEFAULT_TEMPERATURE
+    raw_t = os.getenv("MINUTES_SUMMARY_TEMPERATURE", "").strip()
+    if raw_t:
+        try:
+            temperature = float(raw_t)
+        except ValueError:
+            logger.warning(f"MINUTES_SUMMARY_TEMPERATURE={raw_t!r} không hợp lệ, dùng {temperature}")
+
+    max_tokens = DEFAULT_MAX_OUTPUT_TOKENS
+    raw_m = os.getenv("MINUTES_SUMMARY_MAX_TOKENS", "").strip()
+    if raw_m:
+        try:
+            max_tokens = int(raw_m)
+        except ValueError:
+            logger.warning(f"MINUTES_SUMMARY_MAX_TOKENS={raw_m!r} không hợp lệ, dùng {max_tokens}")
+
+    return {"temperature": temperature, "max_output_tokens": max_tokens}
 
 
 def _extract_text(response) -> str:
@@ -87,8 +129,8 @@ def generate_summary_text(
 ) -> Optional[str]:
     """Gọi LLM sinh biên bản từ danh sách transcript. Trả None nếu không thể.
 
-    ``client`` có thể được inject (mock) khi test. Nếu None, tạo Anthropic client
-    từ ANTHROPIC_API_KEY.
+    ``client`` có thể được inject (mock) khi test. Nếu None, tạo Gemini client
+    (google.genai) từ GEMINI_API_KEY/GOOGLE_API_KEY.
     """
     transcript_text = format_transcript_for_prompt(transcripts, name_map)
     if not transcript_text.strip():
@@ -106,8 +148,11 @@ def generate_summary_text(
 
     model = model or os.getenv("MINUTES_SUMMARY_MODEL", DEFAULT_MODEL)
     prompt = build_summary_prompt(transcript_text)
+    config = build_generation_config()
     try:
-        response = client.models.generate_content(model=model, contents=prompt)
+        response = client.models.generate_content(
+            model=model, contents=prompt, config=config
+        )
     except Exception as e:
         logger.error(f"❌ [minutes] Gọi LLM thất bại: {e}")
         return None

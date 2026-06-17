@@ -62,10 +62,21 @@ class MinutesHistoryService:
         if self._session_data is not None:
             self._session_data["summary"] = summary
 
-    def end_session(self) -> Optional[str]:
-        """Đóng session, ghi ra JSON. Trả về đường dẫn file (hoặc None)."""
+    def end_session(self, expected_session_id: Optional[str] = None) -> Optional[str]:
+        """Đóng session, ghi ra JSON. Trả về đường dẫn file (hoặc None).
+
+        ``expected_session_id``: nếu truyền vào, CHỈ đóng khi đúng session đó còn
+        đang mở. Dùng cho việc đóng-trễ (grace window): tránh đè khi người dùng đã
+        bắt đầu một phiên mới trong lúc đang chờ các câu final muộn của phiên cũ.
+        """
         if not self._current_session_id or self._session_data is None:
             logger.warning("⚠️ [minutes] Không có session để đóng")
+            return None
+        if expected_session_id is not None and expected_session_id != self._current_session_id:
+            logger.info(
+                f"⏭️ [minutes] Bỏ qua đóng-trễ {expected_session_id}: "
+                f"session hiện tại đã là {self._current_session_id}"
+            )
             return None
 
         json_path = os.path.join(
