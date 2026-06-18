@@ -22,6 +22,7 @@ Pattern run_stt copy từ src/pipecat/services/fal/stt.py (FalSTTService).
 """
 
 import os
+import re
 
 from typing import AsyncGenerator, Optional
 
@@ -36,6 +37,25 @@ from pipecat.utils.time import time_now_iso8601
 # Mặc định trỏ tới gateway (LiteLLM) — domain ĐÃ mount nemotron-asr (đã verify).
 DEFAULT_BASE_URL = "https://gateway.gotechjsc.com/v1"
 DEFAULT_MODEL = "nemotron-asr"
+
+# nemotron-asr BỎ QUA field `language` trong request (đã verify 2026-06-18: ép
+# zh-CN/en/ja lên audio tiếng Việt vẫn ra tiếng Việt). Thay vào đó model TỰ
+# auto-detect và NHÚNG nhãn ngôn ngữ thật vào cuối text, vd "...nghiệp. <vi-VN>".
+# => Không ép được bằng param; phải lọc phía client dựa trên chính nhãn này.
+_LANG_TAG_RE = re.compile(r"\s*<([A-Za-z]{2,3}(?:-[A-Za-z0-9]+)?)>\s*$")
+
+
+def _split_lang_tag(text: str) -> tuple[str, Optional[str]]:
+    """Tách nhãn ngôn ngữ <xx-XX> ở cuối text do nemotron-asr nhúng vào.
+
+    Returns:
+        (text_đã_sạch, mã_ngôn_ngữ_2_ký_tự_lowercase | None nếu không có nhãn).
+    """
+    m = _LANG_TAG_RE.search(text)
+    if not m:
+        return text, None
+    code = m.group(1).split("-")[0].lower()
+    return text[: m.start()].rstrip(), code
 
 
 class GoTechASRSTTService(SegmentedSTTService):
@@ -136,7 +156,19 @@ class GoTechASRSTTService(SegmentedSTTService):
                     return
                 data = await resp.json()
 
-            text = (data.get("text") or "").strip()
+            raw = (data.get("text") or "").strip()
+            text, detected = _split_lang_tag(raw)
+
+            # Model auto-detect và bỏ qua field language -> nếu nó tự nhận segment
+            # KHÔNG phải tiếng Việt (vd <zh-CN>), bỏ hẳn segment để tránh ký tự
+            # tiếng Trung lọt vào biên bản tiếng Việt.
+            want = self._language.value.split("-")[0].lower()
+            if detected and detected != want:
+                logger.info(
+                    f"[gotech-asr] Bỏ segment non-{want} (model detect '{detected}'): [{text}]"
+                )
+                return
+
             if text:  # chỉ phát khi có nội dung (tránh lưu câu rỗng vào lịch sử)
                 logger.debug(f"[gotech-asr] Transcription: [{text}]")
                 yield TranscriptionFrame(

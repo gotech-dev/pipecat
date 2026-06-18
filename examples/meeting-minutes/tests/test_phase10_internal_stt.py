@@ -9,7 +9,7 @@ import pytest
 from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, StartFrame, TranscriptionFrame
 from pipecat.transcriptions.language import Language
 
-from gotech_asr_stt import GoTechASRSTTService
+from gotech_asr_stt import GoTechASRSTTService, _split_lang_tag
 
 
 # --------------------------- fakes aiohttp ------------------------------
@@ -85,6 +85,44 @@ async def test_run_stt_sends_correct_form_and_auth(monkeypatch):
     call = sess.posted[0]
     assert call["url"].endswith("/audio/transcriptions")
     assert call["headers"]["Authorization"] == "Bearer secret"
+
+
+# --------------------------- nhãn ngôn ngữ auto-detect ------------------
+# nemotron-asr bỏ qua field `language`, tự auto-detect và nhúng nhãn <xx-XX>
+# vào cuối text. Client phải cắt nhãn + bỏ segment không phải tiếng Việt.
+def test_split_lang_tag_variants():
+    assert _split_lang_tag("Chào. <vi-VN>") == ("Chào.", "vi")
+    assert _split_lang_tag("你好 <zh-CN>") == ("你好", "zh")
+    assert _split_lang_tag("hi <en>") == ("hi", "en")
+    assert _split_lang_tag("không có nhãn") == ("không có nhãn", None)
+
+
+@pytest.mark.asyncio
+async def test_run_stt_strips_vi_tag(monkeypatch):
+    svc = _svc(monkeypatch, GOTECH_ASR_API_KEY="k")
+    svc._session = _FakeSession(
+        resp=_FakeResp(200, {"text": "Đấy là doanh nghiệp. <vi-VN>", "language": "vi"})
+    )
+    frames = await _collect(svc.run_stt(b"x"))
+    assert len(frames) == 1
+    assert frames[0].text == "Đấy là doanh nghiệp."  # nhãn đã bị cắt
+
+
+@pytest.mark.asyncio
+async def test_run_stt_drops_non_vietnamese_segment(monkeypatch):
+    svc = _svc(monkeypatch, GOTECH_ASR_API_KEY="k")
+    # model tự detect tiếng Trung (dù ta gửi language=vi) -> bỏ hẳn, không nhả
+    svc._session = _FakeSession(resp=_FakeResp(200, {"text": "请不吝点赞 <zh-CN>", "language": "vi"}))
+    assert await _collect(svc.run_stt(b"x")) == []
+
+
+@pytest.mark.asyncio
+async def test_run_stt_keeps_text_without_tag(monkeypatch):
+    svc = _svc(monkeypatch, GOTECH_ASR_API_KEY="k")
+    # không có nhãn -> không suy ra non-vi, vẫn giữ nguyên text
+    svc._session = _FakeSession(resp=_FakeResp(200, {"text": "Một câu tiếng Việt", "language": "vi"}))
+    frames = await _collect(svc.run_stt(b"x"))
+    assert len(frames) == 1 and frames[0].text == "Một câu tiếng Việt"
 
 
 # --------------------------- run_stt edge cases -------------------------
