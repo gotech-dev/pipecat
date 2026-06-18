@@ -58,6 +58,20 @@ def _split_lang_tag(text: str) -> tuple[str, Optional[str]]:
     return text[: m.start()].rstrip(), code
 
 
+# Khoảng ký tự CJK (Hán + Kana Nhật + Hangul Hàn + dấu câu/fullwidth Á Đông).
+# Tiếng Việt chỉ dùng Latin + dấu, KHÔNG bao giờ chứa các ký tự này -> hễ xuất
+# hiện là model auto-detect nhầm (vd trả thẳng "生活" mà không kèm nhãn ngôn ngữ).
+_CJK_RE = re.compile(
+    r"[　-〿぀-ヿㇰ-ㇿ㐀-䶿"
+    r"一-鿿가-힯豈-﫿＀-￯]"
+)
+
+
+def _has_cjk(text: str) -> bool:
+    """True nếu text chứa bất kỳ ký tự CJK nào (chắc chắn không phải tiếng Việt)."""
+    return bool(_CJK_RE.search(text))
+
+
 class GoTechASRSTTService(SegmentedSTTService):
     """STT batch nội bộ: mỗi lượt nói (VAD segment) -> 1 request HTTP -> 1 câu final."""
 
@@ -167,6 +181,13 @@ class GoTechASRSTTService(SegmentedSTTService):
                 logger.info(
                     f"[gotech-asr] Bỏ segment non-{want} (model detect '{detected}'): [{text}]"
                 )
+                return
+
+            # Lưới chặn cuối: model có thể trả ký tự Hán/Kana/Hangul mà KHÔNG kèm
+            # nhãn ngôn ngữ -> nhãn ở trên không bắt được. Tiếng Việt không bao giờ
+            # có ký tự CJK nên cứ thấy là bỏ.
+            if _has_cjk(text):
+                logger.info(f"[gotech-asr] Bỏ segment chứa ký tự CJK (detect nhầm): [{text}]")
                 return
 
             if text:  # chỉ phát khi có nội dung (tránh lưu câu rỗng vào lịch sử)

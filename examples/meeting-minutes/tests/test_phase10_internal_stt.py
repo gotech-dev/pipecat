@@ -9,7 +9,7 @@ import pytest
 from pipecat.frames.frames import CancelFrame, EndFrame, ErrorFrame, StartFrame, TranscriptionFrame
 from pipecat.transcriptions.language import Language
 
-from gotech_asr_stt import GoTechASRSTTService, _split_lang_tag
+from gotech_asr_stt import GoTechASRSTTService, _has_cjk, _split_lang_tag
 
 
 # --------------------------- fakes aiohttp ------------------------------
@@ -113,6 +113,24 @@ async def test_run_stt_drops_non_vietnamese_segment(monkeypatch):
     svc = _svc(monkeypatch, GOTECH_ASR_API_KEY="k")
     # model tự detect tiếng Trung (dù ta gửi language=vi) -> bỏ hẳn, không nhả
     svc._session = _FakeSession(resp=_FakeResp(200, {"text": "请不吝点赞 <zh-CN>", "language": "vi"}))
+    assert await _collect(svc.run_stt(b"x")) == []
+
+
+def test_has_cjk():
+    assert _has_cjk("生活") is True
+    assert _has_cjk("Xin chào 你好") is True  # lẫn 1 ký tự Hán cũng bắt
+    assert _has_cjk("こんにちは") is True  # kana Nhật
+    assert _has_cjk("안녕하세요") is True  # hangul Hàn
+    assert _has_cjk("Rất là cam kết cho") is False
+    assert _has_cjk("Báo cáo KPI quý 3") is False
+
+
+@pytest.mark.asyncio
+async def test_run_stt_drops_cjk_without_tag(monkeypatch):
+    svc = _svc(monkeypatch, GOTECH_ASR_API_KEY="k")
+    # model trả thẳng chữ Hán KHÔNG kèm nhãn ngôn ngữ -> nhãn không bắt được,
+    # lưới CJK phải chặn.
+    svc._session = _FakeSession(resp=_FakeResp(200, {"text": "生活", "language": "vi"}))
     assert await _collect(svc.run_stt(b"x")) == []
 
 
