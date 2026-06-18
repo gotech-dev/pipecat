@@ -7,6 +7,9 @@ dependencies = [
     "pipecat-ai[webrtc,gladia,speechmatics,silero,local-smart-turn-v3,runner]",
     "google-genai>=1.0",
     "python-dotenv>=1.0.0",
+    # Lưu trữ WAV /minutes lên Cloudflare R2 (S3-compatible). Chỉ dùng khi
+    # MINUTES_STORAGE_BACKEND=r2; mặc định "local" không cần kết nối mạng.
+    "boto3>=1.34",
 ]
 
 [dependency-groups]

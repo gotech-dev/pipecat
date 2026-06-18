@@ -3,4 +3,5 @@ recordings/
 
 # Local env & cache
 .env
+.env.*
 __pycache__/
