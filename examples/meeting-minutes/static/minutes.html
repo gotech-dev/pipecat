@@ -65,7 +65,10 @@
 
         <div class="controls">
             <button id="recordBtn" class="btn btn-rec" onclick="toggleRecording()">▶️ Bắt đầu ghi âm</button>
-            <div class="engine-box">
+            <!-- TẠM ẨN chế độ "AI Nội bộ" (nemotron-asr 0.6b chất lượng thấp) — mặc định
+                 dùng "AI cao cấp" (Speechmatics). Giữ <select> trong DOM để JS đọc
+                 engineSelect.value vẫn ra "premium". Bỏ display:none để bật lại. -->
+            <div class="engine-box" style="display:none;">
                 <label for="engineSelect">Chế độ AI:</label>
                 <select id="engineSelect">
                     <option value="premium" selected>AI cao cấp (tách người nói)</option>
