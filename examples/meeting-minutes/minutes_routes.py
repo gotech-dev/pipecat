@@ -94,13 +94,29 @@ def setup_minutes_routes(app, small_webrtc_handler=None):
         session_id = _new_session_id()
         filename = f"{session_id}.wav"
 
+        # Engine STT do frontend chọn: "premium" (mặc định) | "internal".
+        # Body có thể trống (tương thích ngược) -> mặc định premium.
+        engine = "premium"
+        try:
+            body = await request.json()
+            if isinstance(body, dict) and body.get("engine") == "internal":
+                engine = "internal"
+        except Exception:
+            pass
+
         minutes_bot.minutes_recording_state["is_recording"] = True
         minutes_bot.minutes_recording_state["current_filename"] = filename
         minutes_bot.minutes_recording_state["session_id"] = session_id
+        minutes_bot.minutes_recording_state["engine"] = engine
 
         minutes_history_service.start_session(session_id)
-        logger.info(f"🎬 [minutes] Bắt đầu ghi: {filename}")
-        return {"status": "recording", "filename": filename, "session_id": session_id}
+        logger.info(f"🎬 [minutes] Bắt đầu ghi: {filename} (engine={engine})")
+        return {
+            "status": "recording",
+            "filename": filename,
+            "session_id": session_id,
+            "engine": engine,
+        }
 
     @app.post("/api/minutes/stop-recording")
     async def minutes_stop_recording(request: Request, background_tasks: BackgroundTasks):

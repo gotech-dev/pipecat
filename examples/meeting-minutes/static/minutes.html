@@ -26,7 +26,14 @@
         .btn-rec.recording { background: #dc2626; }
         .btn-primary { background: #2563eb; color: #fff; }
         .btn:disabled { opacity: .5; cursor: not-allowed; }
-        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+        .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
+        .engine-box { display: flex; align-items: center; gap: 8px; }
+        .engine-box label { font-size: 13px; color: #94a3b8; }
+        #engineSelect {
+            background: #1e293b; color: #e2e8f0; border: 1px solid #334155;
+            border-radius: 8px; padding: 9px 12px; font-size: 14px; cursor: pointer;
+        }
+        #engineSelect:disabled { opacity: .5; cursor: not-allowed; }
         #status { font-size: 14px; color: #94a3b8; min-height: 20px; }
         #status.recording { color: #f87171; font-weight: 600; }
         .panel { background: #1e293b; border-radius: 14px; padding: 18px; margin-bottom: 18px; }
@@ -47,7 +54,7 @@
     <div class="wrap">
         <header>
             <h1>📋 Biên bản cuộc họp
-                <small>Tiếng Việt · tự động tách người nói (Speechmatics) · tóm tắt AI</small>
+                <small>Tiếng Việt · chọn chế độ AI · tóm tắt tự động</small>
             </h1>
             <div style="display:flex;gap:8px;">
                 <a href="/minutes/history" style="text-decoration:none;"><button class="btn btn-ghost">📚 Lịch sử</button></a>
@@ -58,6 +65,13 @@
 
         <div class="controls">
             <button id="recordBtn" class="btn btn-rec" onclick="toggleRecording()">▶️ Bắt đầu ghi âm</button>
+            <div class="engine-box">
+                <label for="engineSelect">Chế độ AI:</label>
+                <select id="engineSelect">
+                    <option value="premium" selected>AI cao cấp (tách người nói)</option>
+                    <option value="internal">AI Nội bộ</option>
+                </select>
+            </div>
             <div id="status">Sẵn sàng ghi âm.</div>
         </div>
 
@@ -146,7 +160,12 @@
                     if (ws) { ws.close(); ws = null; }
                     await new Promise(r => setTimeout(r, 400));
 
-                    const resp = await fetch('/api/minutes/start-recording', { method: 'POST' });
+                    const engine = document.getElementById('engineSelect').value;
+                    const resp = await fetch('/api/minutes/start-recording', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ engine })
+                    });
                     if (!resp.ok) throw new Error('Không thể bắt đầu ghi âm');
                     const data = await resp.json();
                     currentSessionId = data.session_id;
@@ -166,6 +185,7 @@
                         catch (e) {
                             alert('Không thể kết nối microphone: ' + e.message);
                             btn.textContent = '▶️ Bắt đầu ghi âm'; btn.classList.remove('recording'); isRecording = false;
+                            document.getElementById('engineSelect').disabled = false;
                         }
                     };
                     ws.onmessage = (ev) => addTranscript(JSON.parse(ev.data));
@@ -173,6 +193,7 @@
 
                     btn.textContent = '⏹️ Dừng ghi âm';
                     btn.classList.add('recording');
+                    document.getElementById('engineSelect').disabled = true;
                     status.textContent = '🔴 Đang ghi âm...';
                     status.classList.add('recording');
                     isRecording = true;
@@ -188,6 +209,7 @@
 
                     btn.textContent = '▶️ Bắt đầu ghi âm';
                     btn.classList.remove('recording');
+                    document.getElementById('engineSelect').disabled = false;
                     status.classList.remove('recording');
                     status.textContent = '✅ Đã dừng. Đang tạo biên bản AI...';
                     document.getElementById('summary').innerHTML = '<span class="spin">⏳ Đang tạo biên bản, vui lòng đợi...</span>';
@@ -198,6 +220,7 @@
                     alert('Lỗi khi dừng: ' + e.message);
                     isRecording = false; disconnectWebRTC();
                     if (ws) { ws.close(); ws = null; }
+                    document.getElementById('engineSelect').disabled = false;
                 }
             }
         }

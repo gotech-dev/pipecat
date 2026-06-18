@@ -33,7 +33,15 @@ def _load_minutes_keys_from_root_env():
         from dotenv import dotenv_values
 
         vals = dotenv_values(root_env)
-        for k in ("SPEECHMATICS_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        for k in (
+            "SPEECHMATICS_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            # Chế độ "AI Nội bộ" (nemotron-asr qua gateway)
+            "GOTECH_ASR_API_KEY",
+            "GOTECH_ASR_BASE_URL",
+            "GOTECH_ASR_MODEL",
+        ):
             if not os.getenv(k) and vals.get(k):
                 os.environ[k] = vals[k]
     except Exception as e:  # pragma: no cover
@@ -67,6 +75,8 @@ minutes_recording_state = {
     "is_recording": False,
     "current_filename": None,
     "session_id": None,
+    # Engine STT: "premium" (Speechmatics, mặc định) | "internal" (nemotron-asr nội bộ)
+    "engine": "premium",
 }
 
 # Instance recorder riêng (gán trong run_minutes_bot ở Phase 2)
@@ -226,6 +236,25 @@ def build_speechmatics_stt(api_key: str = None) -> SpeechmaticsSTTService:
     )
 
 
+def build_internal_asr_stt():
+    """Tạo STT "AI Nội bộ" (nemotron-asr qua gateway). KHÔNG tách người nói.
+
+    Import lazy để chế độ premium (Speechmatics) không phụ thuộc module này.
+    """
+    from gotech_asr_stt import GoTechASRSTTService
+
+    return GoTechASRSTTService(language=MINUTES_LANGUAGE)
+
+
+def build_minutes_stt(engine: str = "premium"):
+    """Chọn STT theo engine. Mặc định/không hợp lệ -> premium (Speechmatics)."""
+    if engine == "internal":
+        logger.info("[minutes] Engine STT: AI Nội bộ (nemotron-asr)")
+        return build_internal_asr_stt()
+    logger.info("[minutes] Engine STT: AI cao cấp (Speechmatics)")
+    return build_speechmatics_stt()
+
+
 def build_minutes_pipeline(transport, stt, recorder, broadcaster=None) -> Pipeline:
     """Dựng pipeline /minutes: input -> STT(diarization) -> broadcaster -> recorder."""
     broadcaster = broadcaster or minutes_transcript_broadcaster
@@ -250,7 +279,8 @@ async def run_minutes_bot(transport, runner_args):
 
     logger.info("Starting Meeting Minutes (diarization) Bot")
 
-    stt = build_speechmatics_stt()
+    engine = minutes_recording_state.get("engine", "premium")
+    stt = build_minutes_stt(engine)
     recorder = StreamingAudioRecorder(output_dir="recordings")
     minutes_audio_recorder_instance = recorder
 
