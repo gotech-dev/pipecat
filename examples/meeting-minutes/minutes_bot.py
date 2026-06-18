@@ -41,6 +41,10 @@ def _load_minutes_keys_from_root_env():
             # Gladia: dùng làm STT dự phòng cho /minutes khi Speechmatics lỗi
             "GLADIA_API_KEY",
             "GLADIA_REGION",
+            # Chế độ "AI Nội bộ" (nemotron-asr qua gateway)
+            "GOTECH_ASR_API_KEY",
+            "GOTECH_ASR_BASE_URL",
+            "GOTECH_ASR_MODEL",
         ):
             if not os.getenv(k) and vals.get(k):
                 os.environ[k] = vals[k]
@@ -77,6 +81,8 @@ minutes_recording_state = {
     "is_recording": False,
     "current_filename": None,
     "session_id": None,
+    # Engine STT: "premium" (Speechmatics, mặc định) | "internal" (nemotron-asr nội bộ)
+    "engine": "premium",
 }
 
 # Instance recorder riêng (gán trong run_minutes_bot ở Phase 2)
@@ -315,11 +321,30 @@ def build_gladia_fallback_stt() -> GladiaSTTService:
     )
 
 
-async def build_minutes_stt():
-    """Chọn STT cho /minutes: ưu tiên Speechmatics, lỗi thì fallback sang Gladia."""
+def build_internal_asr_stt():
+    """Tạo STT "AI Nội bộ" (nemotron-asr qua gateway). KHÔNG tách người nói.
+
+    Import lazy để chế độ premium (Speechmatics) không phụ thuộc module này.
+    """
+    from gotech_asr_stt import GoTechASRSTTService
+
+    return GoTechASRSTTService(language=MINUTES_LANGUAGE)
+
+
+async def build_minutes_stt(engine: str = "premium"):
+    """Chọn STT cho /minutes theo engine do người dùng chọn.
+
+    - "internal": AI Nội bộ (nemotron-asr qua gateway). KHÔNG tách người nói.
+    - "premium" (mặc định/không hợp lệ): ưu tiên Speechmatics (diarization); nếu
+      key lỗi/thiếu thì fallback Gladia (text liền, không tách người).
+    """
+    if engine == "internal":
+        logger.info("[minutes] Engine STT: AI Nội bộ (nemotron-asr)")
+        return build_internal_asr_stt()
     if await speechmatics_available():
+        logger.info("[minutes] Engine STT: AI cao cấp (Speechmatics + diarization)")
         return build_speechmatics_stt()
-    logger.warning("🔁 [minutes] Dùng Gladia thay Speechmatics (text liền, không tách người)")
+    logger.warning("🔁 [minutes] Speechmatics lỗi -> fallback Gladia (text liền, không tách người)")
     return build_gladia_fallback_stt()
 
 
@@ -347,7 +372,8 @@ async def run_minutes_bot(transport, runner_args):
 
     logger.info("Starting Meeting Minutes (diarization) Bot")
 
-    stt = await build_minutes_stt()
+    engine = minutes_recording_state.get("engine", "premium")
+    stt = await build_minutes_stt(engine)
     recorder = StreamingAudioRecorder(output_dir="recordings")
     minutes_audio_recorder_instance = recorder
 
