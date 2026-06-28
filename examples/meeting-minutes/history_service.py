@@ -35,6 +35,7 @@ class HistoryService:
             "session_id": session_id,
             "transcripts": [],
             "translations": [],
+            "summary": None,
         }
         logger.info(f"📚 Started history session: {session_id}")
 
@@ -197,6 +198,52 @@ class HistoryService:
                     logger.warning(f"⚠️ No JSON file found for {recording_id}")
         
         return result
+
+    # ---------------------------------------------------------------- summary
+    def _load_json(self, session_id: str) -> Optional[dict]:
+        """Đọc file JSON của 1 session (None nếu không có / lỗi)."""
+        json_path = os.path.join(self._recordings_dir, f"{session_id}.json")
+        if not os.path.exists(json_path):
+            return None
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:  # pragma: no cover
+            logger.error(f"❌ Failed to load JSON {session_id}: {e}")
+            return None
+
+    def load_transcripts(self, session_id: str) -> List[Dict]:
+        """Đọc các câu transcription final (ngôn ngữ gốc) của 1 session đã lưu."""
+        data = self._load_json(session_id)
+        if not data:
+            return []
+        return [
+            t
+            for t in data.get("transcripts", [])
+            if t.get("is_final", False)
+        ]
+
+    def update_summary(self, session_id: str, summary: str) -> bool:
+        """Ghi biên bản AI vào file JSON của session đã đóng. True nếu thành công."""
+        data = self._load_json(session_id)
+        if data is None:
+            logger.warning(f"⚠️ No session {session_id} found to write summary")
+            return False
+        data["summary"] = summary
+        json_path = os.path.join(self._recordings_dir, f"{session_id}.json")
+        try:
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info(f"✅ Saved AI summary to {json_path}")
+            return True
+        except Exception as e:  # pragma: no cover
+            logger.error(f"❌ Failed to save summary: {e}")
+            return False
+
+    def get_summary(self, session_id: str) -> Optional[str]:
+        """Lấy biên bản AI (None nếu chưa có)."""
+        data = self._load_json(session_id)
+        return data.get("summary") if data else None
 
 
 # Global history service instance

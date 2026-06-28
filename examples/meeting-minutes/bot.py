@@ -314,6 +314,38 @@ async def check_auth(request: Request):
     session = request.session
     return session.get("authenticated", False) == True
 
+def run_meeting_summary(session_id: str):
+    """Sinh biên bản song ngữ (gốc + Việt) cho 1 session /meeting. Chạy nền.
+
+    Lỗi không làm hỏng luồng dừng ghi. Import lazy để khởi động không kéo theo
+    google.genai khi chưa cần.
+    """
+    try:
+        from meeting_summary import generate_meeting_summary
+
+        summary = generate_meeting_summary(session_id)
+        if summary:
+            logger.info(f"📝 [meeting] Đã sinh biên bản cho {session_id}")
+        else:
+            logger.warning(f"⚠️ [meeting] Không sinh được biên bản cho {session_id}")
+    except Exception as e:  # pragma: no cover
+        logger.error(f"❌ [meeting] Lỗi sinh biên bản: {e}", exc_info=True)
+
+
+def build_meeting_markdown(session_id: str, summary: str) -> str:
+    """Bọc summary (đã là Markdown song ngữ) thành file biên bản có tiêu đề."""
+    parts = session_id.split("_")  # ['meeting', lang, 'YYYYMMDD', 'HHMMSS']
+    d = parts[2] if len(parts) > 2 else ""
+    t = parts[3] if len(parts) > 3 else ""
+    date_str = f"{d[6:8]}/{d[4:6]}/{d[0:4]}" if len(d) == 8 else d
+    time_str = f"{t[0:2]}:{t[2:4]}:{t[4:6]}" if len(t) == 6 else t
+    when = f"{date_str} {time_str}".strip()
+    header = "# Biên bản cuộc họp\n"
+    if when:
+        header += f"\n*{when}*\n"
+    return f"{header}\n---\n\n{summary.strip()}\n"
+
+
 # Function to setup custom routes (called by runner)
 def setup_custom_routes(app: FastAPI):
     """Setup custom API routes for meeting minutes."""
@@ -488,24 +520,60 @@ def setup_custom_routes(app: FastAPI):
         return {
             "status": "recording",
             "language": language_code,
+            "filename": filename,
+            "session_id": session_id,
         }
 
     @app.post("/api/stop-recording")
-    async def stop_recording(request: Request):
+    async def stop_recording(request: Request, background_tasks: BackgroundTasks):
         """Stop recording."""
         # Check authentication
         if not request.session.get("authenticated", False):
             raise HTTPException(status_code=401, detail="Unauthorized")
-        
+
         recording_state["is_recording"] = False
         if audio_recorder_instance:
             await audio_recorder_instance.stop_recording()
+        # Capture session_id (= filename không .wav) TRƯỚC khi clear để sinh biên bản
+        current_filename = recording_state.get("current_filename")
+        session_id = current_filename.replace(".wav", "") if current_filename else None
         # End history session and save to JSON (always, even if recorder not ready)
         history_service.end_session()
         # Clear current filename
         recording_state["current_filename"] = None
-        logger.info("Recording stopped")
-        return {"status": "stopped"}
+        # Sinh biên bản AI song ngữ ở nền (sau khi JSON đã ghi xong)
+        if session_id:
+            background_tasks.add_task(run_meeting_summary, session_id)
+        logger.info(f"Recording stopped (session={session_id})")
+        return {"status": "stopped", "session_id": session_id}
+
+    @app.get("/api/summary/{session_id}")
+    async def get_summary(request: Request, session_id: str):
+        """Lấy biên bản AI song ngữ của 1 session (None nếu chưa sinh xong)."""
+        if not request.session.get("authenticated", False):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return {
+            "session_id": session_id,
+            "summary": history_service.get_summary(session_id),
+        }
+
+    @app.get("/api/summary/{session_id}/download")
+    async def download_summary(request: Request, session_id: str):
+        """Tải biên bản AI dưới dạng file .md."""
+        if not request.session.get("authenticated", False):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        summary = history_service.get_summary(session_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="Chưa có biên bản cho phiên này")
+        from fastapi.responses import Response
+
+        content = build_meeting_markdown(session_id, summary)
+        filename = f"bien-ban-{session_id}.md"
+        return Response(
+            content=content,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     @app.get("/api/status")
     async def get_status(request: Request):

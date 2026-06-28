@@ -217,6 +217,75 @@
         .transcripts::-webkit-scrollbar-thumb:hover {
             background: #555;
         }
+
+        /* Tiêu đề từng khu (Bản gốc / Bản dịch / Tóm tắt) */
+        .section-title {
+            padding: 16px 30px 8px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #495057;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .section-title.gap {
+            border-top: 1px solid #e9ecef;
+            margin-top: 4px;
+        }
+
+        /* Panel bản dịch tiếng Việt (khu riêng phía dưới) */
+        .translations-panel {
+            max-height: 320px;
+        }
+
+        /* Khu tóm tắt AI */
+        .summary-wrap {
+            padding: 0 30px 30px;
+            background: white;
+        }
+
+        .summary-box {
+            padding: 20px;
+            border-radius: 10px;
+            background: #f1f8ff;
+            border: 1px solid #cfe2ff;
+            white-space: pre-wrap;
+            line-height: 1.65;
+            font-size: 15px;
+            color: #1f2d3d;
+            min-height: 60px;
+        }
+
+        .summary-box.empty {
+            color: #6c757d;
+            font-style: italic;
+            background: #f8f9fa;
+            border-color: #e9ecef;
+        }
+
+        .download-btn {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            min-width: auto;
+        }
+
+        .download-btn:disabled {
+            background: #adb5bd;
+            cursor: not-allowed;
+        }
+
+        .spin {
+            color: #856404;
+        }
     </style>
 </head>
 
@@ -247,11 +316,27 @@
             <div class="status" id="status"></div>
         </div>
 
+        <div class="section-title">📝 Bản gốc</div>
         <div class="transcripts" id="transcripts">
             <div class="empty-state">
                 <div class="empty-state-icon">🎤</div>
                 <div class="empty-state-text">Chọn ngôn ngữ và bấm "Bắt đầu ghi âm" để bắt đầu</div>
             </div>
+        </div>
+
+        <div class="section-title gap">🌐 Bản dịch tiếng Việt</div>
+        <div class="transcripts translations-panel" id="translations">
+            <div class="empty-state">
+                <div class="empty-state-text">Bản dịch tiếng Việt sẽ hiển thị ở đây khi bắt đầu ghi âm.</div>
+            </div>
+        </div>
+
+        <div class="section-title gap">
+            <span>📋 Tóm tắt cuộc họp (AI)</span>
+            <button id="summaryBtn" class="download-btn" onclick="downloadSummary()" disabled>⬇️ Tải .md</button>
+        </div>
+        <div class="summary-wrap">
+            <div id="summary" class="summary-box empty">Biên bản (ngôn ngữ gốc + tiếng Việt) sẽ được tạo tự động sau khi bạn dừng ghi âm.</div>
         </div>
     </div>
 
@@ -259,6 +344,7 @@
         let isRecording = false;
         let ws = null;
         let transcriptCount = 0;
+        let currentSessionId = null;
         let pc = null; // RTCPeerConnection
         let localStream = null;
         let lastIceStats = null; // Store last ICE stats for debugging
@@ -524,6 +610,20 @@
                         throw new Error('Failed to start recording');
                     }
 
+                    const startData = await response.json();
+                    currentSessionId = startData.session_id || null;
+
+                    // Reset các khu nội dung cho phiên mới
+                    document.getElementById('transcripts').innerHTML =
+                        '<div class="empty-state"><div class="empty-state-text">Đang nghe...</div></div>';
+                    transcriptCount = 0;
+                    document.getElementById('translations').innerHTML =
+                        '<div class="empty-state"><div class="empty-state-text">Đang nghe...</div></div>';
+                    const summaryEl = document.getElementById('summary');
+                    summaryEl.textContent = 'Biên bản (ngôn ngữ gốc + tiếng Việt) sẽ được tạo tự động sau khi bạn dừng ghi âm.';
+                    summaryEl.className = 'summary-box empty';
+                    document.getElementById('summaryBtn').disabled = true;
+
                     // Connect WebSocket
                     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                     const wsUrl = `${protocol}//${window.location.host}/ws/transcripts`;
@@ -584,6 +684,12 @@
 
                     // Stop recording on server
                     await fetch('/api/stop-recording', { method: 'POST' });
+
+                    // Bắt đầu chờ biên bản AI song ngữ (sinh ở nền trên server)
+                    const summaryEl = document.getElementById('summary');
+                    summaryEl.innerHTML = '<span class="spin">⏳ Đang tạo biên bản (ngôn ngữ gốc + tiếng Việt), vui lòng đợi...</span>';
+                    summaryEl.className = 'summary-box';
+                    pollSummary(currentSessionId);
 
                     // Disconnect WebRTC first
                     disconnectWebRTC();
@@ -666,6 +772,15 @@
                 }
 
             } else if (data.type === 'translation') {
+                // Bản dịch hiển thị ở PANEL RIÊNG phía dưới (#translations)
+                const translations = document.getElementById('translations');
+
+                // Xoá empty-state lần dịch đầu tiên
+                const emptyState = translations.querySelector('.empty-state');
+                if (emptyState) {
+                    translations.innerHTML = '';
+                }
+
                 // Create session translation box if not exists
                 if (!sessionTranslationBox) {
                     sessionTranslationBox = document.createElement('div');
@@ -676,7 +791,7 @@
                         <div class="transcript-timestamp"></div>
                     `;
 
-                    transcripts.appendChild(sessionTranslationBox);
+                    translations.appendChild(sessionTranslationBox);
                 }
 
                 // Append text to the box
@@ -689,6 +804,9 @@
                     textDiv.textContent = data.text;
                 }
                 timestampDiv.textContent = formatTimestamp(data.timestamp);
+
+                // Cuộn panel dịch xuống cuối
+                translations.scrollTop = translations.scrollHeight;
             }
 
             // Scroll to bottom to see latest content
@@ -710,6 +828,38 @@
             } catch {
                 return '';
             }
+        }
+
+        // ----- Biên bản AI song ngữ -----
+        function downloadSummary() {
+            if (!currentSessionId) return;
+            // Điều hướng tới endpoint trả file .md (kèm cookie phiên đăng nhập)
+            window.location.href = `/api/summary/${currentSessionId}/download`;
+        }
+
+        function pollSummary(sessionId, attempt = 0) {
+            const status = document.getElementById('status');
+            const summaryEl = document.getElementById('summary');
+            if (!sessionId || attempt > 30) {
+                if (attempt > 30) {
+                    summaryEl.textContent = 'Không tạo được biên bản (hết thời gian chờ). Vui lòng thử lại.';
+                    summaryEl.className = 'summary-box empty';
+                }
+                return;
+            }
+            fetch(`/api/summary/${sessionId}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.summary) {
+                        summaryEl.textContent = data.summary;
+                        summaryEl.className = 'summary-box';
+                        document.getElementById('summaryBtn').disabled = false;
+                        if (status) status.textContent = '✅ Đã tạo biên bản.';
+                    } else {
+                        setTimeout(() => pollSummary(sessionId, attempt + 1), 2000);
+                    }
+                })
+                .catch(() => setTimeout(() => pollSummary(sessionId, attempt + 1), 2000));
         }
 
         async function connectWebRTC() {
